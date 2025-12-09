@@ -1,0 +1,57 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.so
+*.egg-info/
+.eggs/
+*.egg
+
+# ---- Virtual env ----
+venv/
+env/
+ENV/
+.venv/
+.virtualenv/
+
+# ---- Logs ----
+*.log
+
+# ---- PyInstaller ----
+# build 和 dist 是最核心的输出目录
+build/
+dist/
+
+# PyInstaller 常见输出文件
+*.spec
+*.manifest
+*.dll
+*.toc
+*.pkg
+*.pyz
+*.html  # PyInstaller 生成的 xref-*.html（如果你不想忽略所有 .html，可删除本行）
+localpycs/
+
+# ---- IDE / 编辑器 ----
+# PyCharm / JetBrains
+.idea/
+*.iml
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/dataSources/
+.idea/**/dictionaries/
+.idea/**/shelf/
+
+# VSCode（可选）
+.vscode/
+
+# ---- Windows ----
+Thumbs.db
+Desktop.ini
+
+# ---- Others ----
+*.tmp
+*.bak
+.cache/

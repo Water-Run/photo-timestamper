@@ -1,0 +1,31 @@
+meta:
+  name: "宾得经典"
+  description: "模仿Pentax相机的红色日期印记"
+  version: "1.0"
+
+font:
+  file: "Courier-Prime.ttf"
+  size_ratio: 0.025
+  weight: "bold"
+  italic: false
+
+color:
+  text: "#FF4444"
+  shadow: "#000000"
+  shadow_opacity: 0.3
+
+position:
+  anchor: "bottom-right"
+  margin_x_ratio: 0.02
+  margin_y_ratio: 0.02
+
+format:
+  date_pattern: "%Y.%m.%d"
+  prefix: ""
+  suffix: ""
+
+effects:
+  shadow_enabled: true
+  shadow_offset_x: 2
+  shadow_offset_y: 2
+  opacity: 1.0

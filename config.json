@@ -1,0 +1,24 @@
+{
+  "general": {
+    "recursive_scan": true,
+    "language": "zh-CN"
+  },
+  "time_source": {
+    "primary": "exif",
+    "fallback_enabled": true,
+    "fallback_to": "file_modified"
+  },
+  "output": {
+    "same_directory": true,
+    "custom_directory": "",
+    "filename_pattern": "{original}_stamped",
+    "jpeg_quality": 95,
+    "preserve_exif": true,
+    "overwrite_existing": false
+  },
+  "ui": {
+    "last_style": "佳能",
+    "preview_enabled": true,
+    "window_geometry": "01d9d0cb00030000000000fa00000054000004e10000032c000000fa00000071000004e10000032c000000000000000005a0000000fa00000071000004e10000032c"
+  }
+}

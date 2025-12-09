@@ -1,0 +1,31 @@
+meta:
+  name: "默认灰"
+  description: "灰色经典风格"
+  version: "1.0"
+
+font:
+  file: "Courier-Prime.ttf"
+  size_ratio: 0.025
+  weight: "bold"
+  italic: false
+
+color:
+  text: "#888888"
+  shadow: "#000000"
+  shadow_opacity: 0.3
+
+position:
+  anchor: "bottom-right"
+  margin_x_ratio: 0.02
+  margin_y_ratio: 0.02
+
+format:
+  date_pattern: "%y.%m.%d"
+  prefix: "'"
+  suffix: ""
+
+effects:
+  shadow_enabled: true
+  shadow_offset_x: 2
+  shadow_offset_y: 2
+  opacity: 1.0
