@@ -1,9 +1,12 @@
+# ui.py
 """
 Photo-Timestamper PyQt6 用户界面
-Lightroom 风格专业界面 - 重构版
+Lightroom 风格专业界面 - 重构版 v1.2
 """
 
 import sys
+import os
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -13,7 +16,8 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QComboBox, QProgressBar, QFileDialog,
     QListWidget, QListWidgetItem, QSplitter, QFrame, QMessageBox,
     QCheckBox, QLineEdit, QSpinBox, QGroupBox, QDialog,
-    QAbstractItemView, QMenu, QScrollArea, QSizePolicy
+    QAbstractItemView, QMenu, QScrollArea, QSizePolicy,
+    QTabWidget, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
 from PyQt6.QtGui import (
@@ -33,10 +37,10 @@ from . import __version__, __author__, __collaborators__
 
 # ==================== 主题颜色定义 ====================
 
-# Lightroom 蓝色主题
 LIGHTROOM_BLUE = "#0a84ff"
 LIGHTROOM_BLUE_HOVER = "#409cff"
 LIGHTROOM_BLUE_PRESSED = "#0066cc"
+CHECK_GREEN = "#34c759"
 
 LIGHTROOM_STYLE = f"""
 /* 主窗口背景 */
@@ -47,8 +51,54 @@ QMainWindow {{
 QWidget {{
     background-color: #1e1e1e;
     color: #e0e0e0;
-    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
-    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI", "SF Pro Display", sans-serif;
+    font-size: 12px;
+}}
+
+/* 菜单栏 */
+QMenuBar {{
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #3d3d3d;
+    padding: 2px 0;
+    spacing: 0;
+}}
+
+QMenuBar::item {{
+    background-color: transparent;
+    padding: 6px 12px;
+    border-radius: 4px;
+    margin: 2px 2px;
+}}
+
+QMenuBar::item:selected {{
+    background-color: #404040;
+}}
+
+QMenuBar::item:pressed {{
+    background-color: {LIGHTROOM_BLUE};
+}}
+
+QMenu {{
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 6px;
+}}
+
+QMenu::item {{
+    padding: 8px 32px 8px 12px;
+    border-radius: 4px;
+    margin: 2px 4px;
+}}
+
+QMenu::item:selected {{
+    background-color: {LIGHTROOM_BLUE};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background-color: #3d3d3d;
+    margin: 6px 8px;
 }}
 
 /* 分割器 */
@@ -60,10 +110,6 @@ QSplitter::handle:horizontal {{
     width: 1px;
 }}
 
-QSplitter::handle:vertical {{
-    height: 1px;
-}}
-
 /* 左侧面板 */
 #LeftPanel {{
     background-color: #252525;
@@ -72,12 +118,12 @@ QSplitter::handle:vertical {{
 
 /* 面板标题 */
 #PanelTitle {{
-    color: #808080;
+    color: #909090;
     font-size: 11px;
-    font-weight: bold;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    padding: 12px 16px 8px 16px;
+    letter-spacing: 0.5px;
+    padding: 8px 0 6px 0;
     background-color: transparent;
 }}
 
@@ -85,30 +131,58 @@ QSplitter::handle:vertical {{
 QGroupBox {{
     background-color: #2d2d2d;
     border: 1px solid #3d3d3d;
-    border-radius: 8px;
-    margin-top: 20px;
-    padding: 20px 16px 16px 16px;
-    font-weight: bold;
+    border-radius: 6px;
+    margin-top: 16px;
+    padding: 16px 12px 12px 12px;
+    font-weight: 600;
+    font-size: 11px;
 }}
 
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 16px;
-    padding: 0 8px;
+    left: 12px;
+    padding: 0 6px;
     color: #a0a0a0;
     background-color: #2d2d2d;
+}}
+
+/* 标签页 */
+QTabWidget::pane {{
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    padding: 12px;
+}}
+
+QTabBar::tab {{
+    background-color: #353535;
+    border: 1px solid #3d3d3d;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding: 8px 20px;
+    margin-right: 2px;
+    color: #a0a0a0;
+}}
+
+QTabBar::tab:selected {{
+    background-color: #2d2d2d;
+    color: #ffffff;
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: #404040;
 }}
 
 /* 按钮样式 */
 QPushButton {{
     background-color: #3d3d3d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 10px 20px;
+    border-radius: 4px;
+    padding: 6px 12px;
     color: #e0e0e0;
     font-weight: 500;
-    min-height: 24px;
+    min-height: 20px;
 }}
 
 QPushButton:hover {{
@@ -126,12 +200,12 @@ QPushButton:disabled {{
     border-color: #3d3d3d;
 }}
 
-/* 主要操作按钮 - Lightroom 蓝 */
+/* 主要操作按钮 */
 QPushButton#PrimaryButton {{
     background-color: {LIGHTROOM_BLUE};
     border: none;
     color: white;
-    font-weight: bold;
+    font-weight: 600;
 }}
 
 QPushButton#PrimaryButton:hover {{
@@ -145,6 +219,13 @@ QPushButton#PrimaryButton:pressed {{
 QPushButton#PrimaryButton:disabled {{
     background-color: #404040;
     color: #808080;
+}}
+
+/* 小型按钮 */
+QPushButton#SmallButton {{
+    padding: 4px 10px;
+    font-size: 11px;
+    min-height: 18px;
 }}
 
 /* 危险操作按钮 */
@@ -162,11 +243,11 @@ QPushButton#DangerButton:hover {{
 QComboBox {{
     background-color: #3d3d3d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 10px 14px;
-    padding-right: 36px;
+    border-radius: 4px;
+    padding: 6px 10px;
+    padding-right: 28px;
     color: #e0e0e0;
-    min-height: 24px;
+    min-height: 20px;
 }}
 
 QComboBox:hover {{
@@ -179,15 +260,15 @@ QComboBox:focus {{
 
 QComboBox::drop-down {{
     border: none;
-    width: 28px;
+    width: 24px;
 }}
 
 QComboBox::down-arrow {{
     image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid #808080;
-    margin-right: 10px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #808080;
+    margin-right: 8px;
 }}
 
 QComboBox QAbstractItemView {{
@@ -200,8 +281,8 @@ QComboBox QAbstractItemView {{
 }}
 
 QComboBox QAbstractItemView::item {{
-    padding: 10px 14px;
-    min-height: 28px;
+    padding: 8px 12px;
+    min-height: 24px;
     border-radius: 4px;
 }}
 
@@ -213,16 +294,16 @@ QComboBox QAbstractItemView::item:hover {{
 QListWidget {{
     background-color: #2a2a2a;
     border: 1px solid #3d3d3d;
-    border-radius: 8px;
+    border-radius: 6px;
     outline: none;
-    padding: 6px;
+    padding: 4px;
 }}
 
 QListWidget::item {{
     background-color: transparent;
-    border-radius: 6px;
-    padding: 4px 8px;
-    margin: 2px 0;
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin: 1px 0;
 }}
 
 QListWidget::item:hover {{
@@ -230,27 +311,21 @@ QListWidget::item:hover {{
 }}
 
 QListWidget::item:selected {{
-    background-color: {LIGHTROOM_BLUE};
-    color: white;
-}}
-
-QListWidget::item:selected:!active {{
     background-color: #404040;
 }}
 
 /* 滚动条 */
 QScrollBar:vertical {{
-    background-color: #2a2a2a;
-    width: 14px;
+    background-color: transparent;
+    width: 10px;
     margin: 0;
-    border-radius: 7px;
 }}
 
 QScrollBar::handle:vertical {{
     background-color: #4d4d4d;
-    min-height: 40px;
-    border-radius: 7px;
-    margin: 3px;
+    min-height: 30px;
+    border-radius: 5px;
+    margin: 2px;
 }}
 
 QScrollBar::handle:vertical:hover {{
@@ -263,17 +338,16 @@ QScrollBar::sub-line:vertical {{
 }}
 
 QScrollBar:horizontal {{
-    background-color: #2a2a2a;
-    height: 14px;
+    background-color: transparent;
+    height: 10px;
     margin: 0;
-    border-radius: 7px;
 }}
 
 QScrollBar::handle:horizontal {{
     background-color: #4d4d4d;
-    min-width: 40px;
-    border-radius: 7px;
-    margin: 3px;
+    min-width: 30px;
+    border-radius: 5px;
+    margin: 2px;
 }}
 
 QScrollBar::handle:horizontal:hover {{
@@ -289,27 +363,27 @@ QScrollBar::sub-line:horizontal {{
 QProgressBar {{
     background-color: #2d2d2d;
     border: none;
-    border-radius: 5px;
-    height: 10px;
+    border-radius: 4px;
+    height: 8px;
     text-align: center;
 }}
 
 QProgressBar::chunk {{
     background-color: {LIGHTROOM_BLUE};
-    border-radius: 5px;
+    border-radius: 4px;
 }}
 
 /* 复选框 */
 QCheckBox {{
-    spacing: 10px;
+    spacing: 8px;
     color: #e0e0e0;
 }}
 
 QCheckBox::indicator {{
-    width: 20px;
-    height: 20px;
-    border-radius: 4px;
-    border: 2px solid #4d4d4d;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid #4d4d4d;
     background-color: #2d2d2d;
 }}
 
@@ -320,20 +394,37 @@ QCheckBox::indicator:hover {{
 QCheckBox::indicator:checked {{
     background-color: {LIGHTROOM_BLUE};
     border-color: {LIGHTROOM_BLUE};
-    image: url(check.png);
 }}
 
-QCheckBox::indicator:checked:hover {{
-    background-color: {LIGHTROOM_BLUE_HOVER};
-    border-color: {LIGHTROOM_BLUE_HOVER};
+/* 单选框 */
+QRadioButton {{
+    spacing: 8px;
+    color: #e0e0e0;
+}}
+
+QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 1px solid #4d4d4d;
+    background-color: #2d2d2d;
+}}
+
+QRadioButton::indicator:hover {{
+    border-color: #5d5d5d;
+}}
+
+QRadioButton::indicator:checked {{
+    background-color: {LIGHTROOM_BLUE};
+    border-color: {LIGHTROOM_BLUE};
 }}
 
 /* 输入框 */
 QLineEdit {{
     background-color: #2d2d2d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 10px 14px;
+    border-radius: 4px;
+    padding: 6px 10px;
     color: #e0e0e0;
     selection-background-color: {LIGHTROOM_BLUE};
 }}
@@ -355,10 +446,10 @@ QLineEdit:disabled {{
 QSpinBox {{
     background-color: #2d2d2d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 10px 14px;
+    border-radius: 4px;
+    padding: 6px 10px;
     color: #e0e0e0;
-    min-height: 24px;
+    min-height: 20px;
 }}
 
 QSpinBox:hover {{
@@ -373,8 +464,8 @@ QSpinBox::up-button,
 QSpinBox::down-button {{
     background-color: #3d3d3d;
     border: none;
-    width: 24px;
-    border-radius: 3px;
+    width: 20px;
+    border-radius: 2px;
 }}
 
 QSpinBox::up-button:hover,
@@ -388,19 +479,11 @@ QLabel {{
     background-color: transparent;
 }}
 
-QLabel#SectionLabel {{
-    color: #808080;
-    font-size: 11px;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
 /* 预览区域 */
 #PreviewPanel {{
     background-color: #1a1a1a;
     border: 1px solid #2d2d2d;
-    border-radius: 10px;
+    border-radius: 8px;
 }}
 
 /* 对话框 */
@@ -413,16 +496,16 @@ QStatusBar {{
     background-color: #252525;
     border-top: 1px solid #3d3d3d;
     color: #808080;
-    padding: 6px 16px;
-    font-size: 12px;
+    padding: 4px 12px;
+    font-size: 11px;
 }}
 
 /* 工具提示 */
 QToolTip {{
     background-color: #3d3d3d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 8px 12px;
+    border-radius: 4px;
+    padding: 6px 10px;
     color: #e0e0e0;
 }}
 
@@ -430,9 +513,8 @@ QToolTip {{
 #SearchBox {{
     background-color: #2d2d2d;
     border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    padding: 8px 12px;
-    padding-left: 32px;
+    border-radius: 4px;
+    padding: 6px 10px;
     color: #e0e0e0;
 }}
 
@@ -481,76 +563,143 @@ class ProcessingThread(QThread):
         self.processor.cancel()
 
 
-# ==================== 自定义复选框（带勾号）====================
+# ==================== 自定义勾选框绘制 ====================
 
-class CheckableListItem(QWidget):
-    """带复选框的列表项"""
+class CheckmarkWidget(QWidget):
+    """自定义勾选标记组件"""
+    
+    clicked = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self.setFixedSize(28, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    
+    def is_checked(self) -> bool:
+        return self._checked
+    
+    def set_checked(self, checked: bool):
+        self._checked = checked
+        self.update()
+    
+    def toggle(self):
+        self._checked = not self._checked
+        self.update()
+        self.clicked.emit()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # 绘制圆形背景
+        rect = self.rect().adjusted(2, 2, -2, -2)
+        
+        if self._checked:
+            # 已勾选：绿色填充
+            painter.setBrush(QBrush(QColor(CHECK_GREEN)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(rect)
+            
+            # 绘制白色勾号
+            painter.setPen(QPen(QColor("#ffffff"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            
+            # 勾号路径
+            cx, cy = rect.center().x(), rect.center().y()
+            # 勾号的三个点
+            p1_x, p1_y = cx - 5, cy
+            p2_x, p2_y = cx - 1, cy + 4
+            p3_x, p3_y = cx + 6, cy - 4
+            
+            painter.drawLine(int(p1_x), int(p1_y), int(p2_x), int(p2_y))
+            painter.drawLine(int(p2_x), int(p2_y), int(p3_x), int(p3_y))
+        else:
+            # 未勾选：空心圆
+            painter.setBrush(QBrush(QColor("#3d3d3d")))
+            painter.setPen(QPen(QColor("#5d5d5d"), 2))
+            painter.drawEllipse(rect)
 
-    checked_changed = pyqtSignal(bool)
 
-    def __init__(self, text: str, filepath: str, thumbnail: Optional[QPixmap] = None, parent=None):
+# ==================== 列表项组件 ====================
+
+class ImageListItem(QWidget):
+    """图片列表项 - 带明显的勾选状态"""
+
+    checked_changed = pyqtSignal(str, bool)
+
+    def __init__(self, filename: str, filepath: str, parent=None):
         super().__init__(parent)
         self.filepath = filepath
-        self._checked = False
+        self.filename = filename
+        self._thumbnail: QPixmap | None = None
+
+        self.setFixedHeight(64)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(10)
 
-        # 复选框
-        self.checkbox = QCheckBox()
-        self.checkbox.setFixedSize(22, 22)
-        self.checkbox.stateChanged.connect(self._on_check_changed)
-        layout.addWidget(self.checkbox)
+        # 勾选标记
+        self.checkmark = CheckmarkWidget()
+        self.checkmark.clicked.connect(self._on_checkmark_clicked)
+        layout.addWidget(self.checkmark)
 
-        # 缩略图 - 尺寸提升2倍
+        # 缩略图
         self.thumb_label = QLabel()
-        self.thumb_label.setFixedSize(96, 72)  # 原来是 48x36
+        self.thumb_label.setFixedSize(72, 54)
         self.thumb_label.setStyleSheet("""
             QLabel {
                 background-color: #1a1a1a;
-                border-radius: 4px;
+                border-radius: 3px;
                 border: 1px solid #3d3d3d;
             }
         """)
         self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        if thumbnail:
-            self.set_thumbnail(thumbnail)
         layout.addWidget(self.thumb_label)
 
         # 文件名
-        self.name_label = QLabel(text)
+        self.name_label = QLabel(filename)
         self.name_label.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+        self.name_label.setWordWrap(False)
         layout.addWidget(self.name_label, stretch=1)
 
     def set_thumbnail(self, pixmap: QPixmap):
         """设置缩略图"""
+        self._thumbnail = pixmap
         scaled = pixmap.scaled(
-            94, 70,
+            70, 52,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
         self.thumb_label.setPixmap(scaled)
 
     def is_checked(self) -> bool:
-        return self._checked
+        return self.checkmark.is_checked()
 
     def set_checked(self, checked: bool):
-        self._checked = checked
-        self.checkbox.setChecked(checked)
+        if self.checkmark.is_checked() != checked:
+            self.checkmark.set_checked(checked)
+            self.checked_changed.emit(self.filepath, checked)
 
-    def _on_check_changed(self, state):
-        self._checked = state == Qt.CheckState.Checked.value
-        self.checked_changed.emit(self._checked)
+    def toggle_checked(self):
+        self.checkmark.toggle()
+
+    def _on_checkmark_clicked(self):
+        self.checked_changed.emit(self.filepath, self.checkmark.is_checked())
 
 
 # ==================== 图片列表组件 ====================
 
 class ImageListWidget(QFrame):
-    """图片列表组件，支持拖放和缩略图预览"""
+    """图片列表组件"""
 
     files_dropped = pyqtSignal(list)
     selection_changed = pyqtSignal(list)
+    check_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -558,11 +707,12 @@ class ImageListWidget(QFrame):
         self.setObjectName("ImageListWidget")
 
         self._file_items: dict[str, QListWidgetItem] = {}
+        self._item_widgets: dict[str, ImageListItem] = {}
         self._thumbnails: dict[str, QPixmap] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         # 搜索框
         self.search_box = QLineEdit()
@@ -577,7 +727,8 @@ class ImageListWidget(QFrame):
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
-        self.list_widget.setSpacing(2)
+        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.list_widget.setSpacing(1)
         layout.addWidget(self.list_widget)
 
         # 空状态提示
@@ -586,9 +737,9 @@ class ImageListWidget(QFrame):
         self.empty_label.setStyleSheet("""
             QLabel {
                 color: #606060;
-                font-size: 14px;
-                padding: 50px;
-                line-height: 1.6;
+                font-size: 13px;
+                padding: 40px;
+                line-height: 1.8;
             }
         """)
         layout.addWidget(self.empty_label)
@@ -598,7 +749,7 @@ class ImageListWidget(QFrame):
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.setStyleSheet(f"#ImageListWidget {{ border: 2px dashed {LIGHTROOM_BLUE}; border-radius: 8px; }}")
+            self.setStyleSheet(f"#ImageListWidget {{ border: 2px dashed {LIGHTROOM_BLUE}; border-radius: 6px; }}")
 
     def dragLeaveEvent(self, event):
         self.setStyleSheet("")
@@ -617,42 +768,40 @@ class ImageListWidget(QFrame):
             self.files_dropped.emit(files)
 
     def add_files(self, files: list[str]) -> tuple[int, int]:
-        """添加文件到列表，返回 (添加数量, 重复数量)"""
-        existing_names = set(self._file_items.keys())
+        """添加文件到列表"""
+        existing = set(self._file_items.keys())
         added = 0
         duplicates = 0
 
         for filepath in files:
             filename = Path(filepath).name
 
-            # 检查重复（基于文件名）
-            if filename in existing_names:
+            if filepath in existing or filename in [Path(p).name for p in existing]:
                 duplicates += 1
                 continue
 
-            # 创建列表项
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, filepath)
-            item.setSizeHint(QSize(0, 84))  # 原来是 56，增加高度适应更大缩略图
+            item.setSizeHint(QSize(0, 66))
 
-            # 创建自定义 widget
-            item_widget = CheckableListItem(filename, filepath)
-            item_widget.checked_changed.connect(lambda checked, f=filepath: self._on_item_checked(f, checked))
+            item_widget = ImageListItem(filename, filepath)
+            item_widget.checked_changed.connect(self._on_item_checked)
 
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, item_widget)
 
-            self._file_items[filename] = item
-            existing_names.add(filename)
+            self._file_items[filepath] = item
+            self._item_widgets[filepath] = item_widget
+            existing.add(filepath)
             added += 1
 
             # 延迟加载缩略图
-            QTimer.singleShot(50 * added, lambda fp=filepath, w=item_widget: self._load_thumbnail(fp, w))
+            QTimer.singleShot(30 * added, lambda fp=filepath, w=item_widget: self._load_thumbnail(fp, w))
 
         self._update_empty_state()
         return added, duplicates
 
-    def _load_thumbnail(self, filepath: str, widget: CheckableListItem):
+    def _load_thumbnail(self, filepath: str, widget: ImageListItem):
         """异步加载缩略图"""
         try:
             if filepath in self._thumbnails:
@@ -660,7 +809,7 @@ class ImageListWidget(QFrame):
                 return
 
             image = Image.open(filepath)
-            image.thumbnail((192, 144), Image.Resampling.LANCZOS)  # 原来是 96x72，提升2倍
+            image.thumbnail((144, 108), Image.Resampling.LANCZOS)
 
             if image.mode != 'RGB':
                 image = image.convert('RGB')
@@ -681,13 +830,14 @@ class ImageListWidget(QFrame):
             logger.debug(f"加载缩略图失败: {e}")
 
     def _on_item_checked(self, filepath: str, checked: bool):
-        """项目选中状态变化"""
-        # 同步列表选择状态
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == filepath:
-                item.setSelected(checked)
-                break
+        """项目勾选状态变化"""
+        self.check_changed.emit()
+
+    def _on_item_double_clicked(self, item: QListWidgetItem):
+        """双击切换勾选状态"""
+        filepath = item.data(Qt.ItemDataRole.UserRole)
+        if filepath in self._item_widgets:
+            self._item_widgets[filepath].toggle_checked()
 
     def get_all_files(self) -> list[str]:
         """获取所有文件路径"""
@@ -697,26 +847,58 @@ class ImageListWidget(QFrame):
             if not self.list_widget.item(i).isHidden()
         ]
 
+    def get_checked_files(self) -> list[str]:
+        """获取已勾选的文件"""
+        checked = []
+        for filepath, widget in self._item_widgets.items():
+            if widget.is_checked():
+                checked.append(filepath)
+        return checked
+
     def get_selected_files(self) -> list[str]:
-        """获取选中的文件路径（包括复选框选中的）"""
-        selected = set()
+        """获取选中的文件（用于预览）"""
+        return [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self.list_widget.selectedItems()
+        ]
 
+    def get_checked_count(self) -> int:
+        """获取已勾选数量"""
+        return len(self.get_checked_files())
+
+    def check_all(self):
+        """勾选所有"""
+        for widget in self._item_widgets.values():
+            widget.set_checked(True)
+        self.check_changed.emit()
+
+    def uncheck_all(self):
+        """取消所有勾选"""
+        for widget in self._item_widgets.values():
+            widget.set_checked(False)
+        self.check_changed.emit()
+
+    def check_selected(self):
+        """勾选选中项"""
         for item in self.list_widget.selectedItems():
-            selected.add(item.data(Qt.ItemDataRole.UserRole))
+            filepath = item.data(Qt.ItemDataRole.UserRole)
+            if filepath in self._item_widgets:
+                self._item_widgets[filepath].set_checked(True)
+        self.check_changed.emit()
 
-        # 也检查复选框
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            widget = self.list_widget.itemWidget(item)
-            if widget and isinstance(widget, CheckableListItem) and widget.is_checked():
-                selected.add(item.data(Qt.ItemDataRole.UserRole))
-
-        return list(selected)
+    def uncheck_selected(self):
+        """取消勾选选中项"""
+        for item in self.list_widget.selectedItems():
+            filepath = item.data(Qt.ItemDataRole.UserRole)
+            if filepath in self._item_widgets:
+                self._item_widgets[filepath].set_checked(False)
+        self.check_changed.emit()
 
     def clear_files(self):
         """清空列表"""
         self.list_widget.clear()
         self._file_items.clear()
+        self._item_widgets.clear()
         self._thumbnails.clear()
         self._update_empty_state()
 
@@ -724,9 +906,8 @@ class ImageListWidget(QFrame):
         """移除选中项"""
         for item in self.list_widget.selectedItems():
             filepath = item.data(Qt.ItemDataRole.UserRole)
-            filename = Path(filepath).name
-
-            self._file_items.pop(filename, None)
+            self._file_items.pop(filepath, None)
+            self._item_widgets.pop(filepath, None)
             self._thumbnails.pop(filepath, None)
             self.list_widget.takeItem(self.list_widget.row(item))
 
@@ -762,17 +943,77 @@ class ImageListWidget(QFrame):
         menu = QMenu(self)
         menu.setStyleSheet(LIGHTROOM_STYLE)
 
+        # 勾选操作
+        check_action = QAction(t("ctx_check_selected"), self)
+        check_action.triggered.connect(self.check_selected)
+        menu.addAction(check_action)
+
+        uncheck_action = QAction(t("ctx_uncheck_selected"), self)
+        uncheck_action.triggered.connect(self.uncheck_selected)
+        menu.addAction(uncheck_action)
+
+        menu.addSeparator()
+
+        # 选择操作
+        select_all_action = QAction(t("ctx_select_all"), self)
+        select_all_action.triggered.connect(self.list_widget.selectAll)
+        menu.addAction(select_all_action)
+
+        deselect_action = QAction(t("ctx_deselect_all"), self)
+        deselect_action.triggered.connect(self.list_widget.clearSelection)
+        menu.addAction(deselect_action)
+
+        menu.addSeparator()
+
+        # 文件操作
+        item = self.list_widget.itemAt(pos)
+        if item:
+            filepath = item.data(Qt.ItemDataRole.UserRole)
+
+            open_file_action = QAction(t("ctx_open_file"), self)
+            open_file_action.triggered.connect(lambda: self._open_file(filepath))
+            menu.addAction(open_file_action)
+
+            open_folder_action = QAction(t("ctx_open_folder"), self)
+            open_folder_action.triggered.connect(lambda: self._open_folder(filepath))
+            menu.addAction(open_folder_action)
+
+            menu.addSeparator()
+
         remove_action = QAction(t("ctx_remove_selected"), self)
         remove_action.triggered.connect(self.remove_selected)
         menu.addAction(remove_action)
-
-        menu.addSeparator()
 
         clear_action = QAction(t("ctx_clear_all"), self)
         clear_action.triggered.connect(self.clear_files)
         menu.addAction(clear_action)
 
         menu.exec(self.list_widget.mapToGlobal(pos))
+
+    def _open_file(self, filepath: str):
+        """打开文件"""
+        try:
+            if sys.platform == 'win32':
+                os.startfile(filepath)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', filepath])
+            else:
+                subprocess.run(['xdg-open', filepath])
+        except Exception as e:
+            logger.error(f"打开文件失败: {e}")
+
+    def _open_folder(self, filepath: str):
+        """打开所在文件夹"""
+        try:
+            folder = str(Path(filepath).parent)
+            if sys.platform == 'win32':
+                subprocess.run(['explorer', '/select,', filepath])
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', '-R', filepath])
+            else:
+                subprocess.run(['xdg-open', folder])
+        except Exception as e:
+            logger.error(f"打开文件夹失败: {e}")
 
     def update_texts(self):
         """更新界面文本"""
@@ -783,23 +1024,24 @@ class ImageListWidget(QFrame):
 # ==================== 预览组件 ====================
 
 class PreviewWidget(QFrame):
-    """图片预览组件 - 高分辨率"""
+    """图片预览组件"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PreviewPanel")
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(300, 200)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 预览标签
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setStyleSheet("""
             QLabel {
                 background-color: #1a1a1a;
-                border-radius: 10px;
+                border-radius: 8px;
+                color: #606060;
+                font-size: 12px;
             }
         """)
         self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -837,8 +1079,7 @@ class PreviewWidget(QFrame):
         """更新缩放后的图片"""
         if self._original_pixmap:
             available_size = self.preview_label.size()
-            # 留出边距
-            target_size = QSize(available_size.width() - 20, available_size.height() - 20)
+            target_size = QSize(available_size.width() - 16, available_size.height() - 16)
             scaled = self._original_pixmap.scaled(
                 target_size,
                 Qt.AspectRatioMode.KeepAspectRatio,
@@ -848,7 +1089,7 @@ class PreviewWidget(QFrame):
 
     def _show_placeholder(self):
         """显示占位符"""
-        self.preview_label.setText("")
+        self.preview_label.setText(t("preview_no_image"))
         self.preview_label.setPixmap(QPixmap())
 
 
@@ -859,8 +1100,8 @@ class LanguageSelectDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Select Language / 选择语言")
-        self.setFixedSize(400, 280)
+        self.setWindowTitle(t("language_select_title"))
+        self.setFixedSize(380, 260)
         self.setStyleSheet(LIGHTROOM_STYLE)
         self.selected_language = "zh-CN"
 
@@ -868,36 +1109,32 @@ class LanguageSelectDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(20)
+        layout.setContentsMargins(28, 28, 28, 28)
+        layout.setSpacing(16)
 
-        # 标题
         title = QLabel("Select Language / 选择语言")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
         layout.addWidget(title)
 
-        # 说明
-        desc = QLabel("Please select your preferred language:\n请选择您的首选语言：")
+        desc = QLabel(t("language_select_desc"))
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc.setStyleSheet("color: #a0a0a0; font-size: 13px;")
+        desc.setStyleSheet("color: #a0a0a0; font-size: 12px;")
         layout.addWidget(desc)
 
-        layout.addSpacing(10)
+        layout.addSpacing(8)
 
-        # 语言选择
         self.language_combo = QComboBox()
-        self.language_combo.setMinimumHeight(44)
+        self.language_combo.setMinimumHeight(38)
         for code, name in LANGUAGE_NAMES.items():
             self.language_combo.addItem(name, code)
         layout.addWidget(self.language_combo)
 
         layout.addStretch()
 
-        # 确认按钮
-        confirm_btn = QPushButton("Confirm / 确定")
+        confirm_btn = QPushButton(t("language_confirm"))
         confirm_btn.setObjectName("PrimaryButton")
-        confirm_btn.setMinimumHeight(44)
+        confirm_btn.setMinimumHeight(38)
         confirm_btn.clicked.connect(self._confirm)
         layout.addWidget(confirm_btn)
 
@@ -920,7 +1157,7 @@ class SettingsDialog(QDialog):
         self.config = config_manager.load()
 
         self.setWindowTitle(t("settings_title"))
-        self.setMinimumSize(520, 620)
+        self.setMinimumSize(480, 520)
         self.setStyleSheet(LIGHTROOM_STYLE)
 
         self._init_ui()
@@ -928,44 +1165,182 @@ class SettingsDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
 
-        # 使用滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        # 标签页
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget, stretch=1)
 
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(20)
+        # 常规标签页
+        general_tab = self._create_general_tab()
+        tab_widget.addTab(general_tab, t("settings_tab_general"))
+
+        # 输出标签页
+        output_tab = self._create_output_tab()
+        tab_widget.addTab(output_tab, t("settings_tab_output"))
+
+        # 高级标签页
+        advanced_tab = self._create_advanced_tab()
+        tab_widget.addTab(advanced_tab, t("settings_tab_advanced"))
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.reset_btn = QPushButton(t("settings_reset"))
+        self.reset_btn.clicked.connect(self._reset_settings)
+        btn_layout.addWidget(self.reset_btn)
+
+        btn_layout.addStretch()
+
+        self.cancel_btn = QPushButton(t("settings_cancel"))
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_btn)
+
+        self.save_btn = QPushButton(t("settings_save"))
+        self.save_btn.setObjectName("PrimaryButton")
+        self.save_btn.setMinimumWidth(90)
+        self.save_btn.clicked.connect(self._save_and_close)
+        btn_layout.addWidget(self.save_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _create_general_tab(self) -> QWidget:
+        """创建常规设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(16)
 
         # 语言设置
         lang_group = QGroupBox(t("settings_language"))
         lang_layout = QVBoxLayout(lang_group)
-        lang_layout.setSpacing(12)
 
         self.language_combo = QComboBox()
         for code, name in LANGUAGE_NAMES.items():
             self.language_combo.addItem(name, code)
         lang_layout.addWidget(self.language_combo)
 
-        scroll_layout.addWidget(lang_group)
+        layout.addWidget(lang_group)
+
+        # 会话设置
+        session_group = QGroupBox(t("settings_tab_general"))
+        session_layout = QVBoxLayout(session_group)
+
+        self.restore_session_check = QCheckBox(t("settings_restore_session"))
+        session_layout.addWidget(self.restore_session_check)
+
+        layout.addWidget(session_group)
+
+        layout.addStretch()
+        return widget
+
+    def _create_output_tab(self) -> QWidget:
+        """创建输出设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(16)
+
+        # 输出目录
+        dir_group = QGroupBox(t("settings_output"))
+        dir_layout = QVBoxLayout(dir_group)
+
+        self.same_dir_radio = QRadioButton(t("settings_same_dir"))
+        self.custom_dir_radio = QRadioButton(t("settings_custom_dir"))
+
+        dir_btn_group = QButtonGroup(self)
+        dir_btn_group.addButton(self.same_dir_radio)
+        dir_btn_group.addButton(self.custom_dir_radio)
+
+        dir_layout.addWidget(self.same_dir_radio)
+        dir_layout.addWidget(self.custom_dir_radio)
+
+        path_layout = QHBoxLayout()
+        self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setPlaceholderText(t("settings_output_dir"))
+        self.output_dir_edit.setEnabled(False)
+        path_layout.addWidget(self.output_dir_edit)
+
+        self.browse_btn = QPushButton(t("settings_browse"))
+        self.browse_btn.setEnabled(False)
+        self.browse_btn.setFixedWidth(80)
+        self.browse_btn.clicked.connect(self._browse_output_dir)
+        path_layout.addWidget(self.browse_btn)
+        dir_layout.addLayout(path_layout)
+
+        self.same_dir_radio.toggled.connect(self._on_dir_option_changed)
+        self.custom_dir_radio.toggled.connect(self._on_dir_option_changed)
+
+        layout.addWidget(dir_group)
+
+        # 文件名设置
+        filename_group = QGroupBox(t("settings_filename_pattern"))
+        filename_layout = QVBoxLayout(filename_group)
+
+        self.filename_pattern_edit = QLineEdit()
+        self.filename_pattern_edit.setText("{original}_stamped")
+        self.filename_pattern_edit.setToolTip(t("settings_filename_tooltip"))
+        filename_layout.addWidget(self.filename_pattern_edit)
+
+        hint_label = QLabel(t("settings_filename_tooltip"))
+        hint_label.setStyleSheet("color: #808080; font-size: 10px;")
+        hint_label.setWordWrap(True)
+        filename_layout.addWidget(hint_label)
+
+        layout.addWidget(filename_group)
+
+        # JPEG质量
+        quality_group = QGroupBox(t("settings_jpeg_quality"))
+        quality_layout = QHBoxLayout(quality_group)
+
+        self.quality_spin = QSpinBox()
+        self.quality_spin.setRange(1, 100)
+        self.quality_spin.setValue(95)
+        self.quality_spin.setSuffix(" %")
+        self.quality_spin.setFixedWidth(100)
+        quality_layout.addWidget(self.quality_spin)
+        quality_layout.addStretch()
+
+        layout.addWidget(quality_group)
+
+        # 其他选项
+        self.preserve_exif_check = QCheckBox(t("settings_preserve_exif"))
+        self.preserve_exif_check.setChecked(True)
+        layout.addWidget(self.preserve_exif_check)
+
+        self.overwrite_check = QCheckBox(t("settings_overwrite"))
+        layout.addWidget(self.overwrite_check)
+
+        layout.addStretch()
+        return widget
+
+    def _create_advanced_tab(self) -> QWidget:
+        """创建高级设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(16)
 
         # 时间源设置
         time_group = QGroupBox(t("settings_time_source"))
         time_layout = QVBoxLayout(time_group)
-        time_layout.setSpacing(14)
 
         time_layout.addWidget(QLabel(t("settings_primary_source")))
-        self.time_source_combo = QComboBox()
-        self.time_source_combo.addItems([
-            t("settings_exif"),
-            t("settings_file_modified"),
-            t("settings_file_created")
-        ])
-        time_layout.addWidget(self.time_source_combo)
+
+        self.time_exif_radio = QRadioButton(t("settings_exif"))
+        self.time_modified_radio = QRadioButton(t("settings_file_modified"))
+        self.time_created_radio = QRadioButton(t("settings_file_created"))
+
+        time_btn_group = QButtonGroup(self)
+        time_btn_group.addButton(self.time_exif_radio)
+        time_btn_group.addButton(self.time_modified_radio)
+        time_btn_group.addButton(self.time_created_radio)
+
+        time_layout.addWidget(self.time_exif_radio)
+        time_layout.addWidget(self.time_modified_radio)
+        time_layout.addWidget(self.time_created_radio)
 
         time_layout.addSpacing(8)
 
@@ -973,85 +1348,10 @@ class SettingsDialog(QDialog):
         self.fallback_check.setChecked(True)
         time_layout.addWidget(self.fallback_check)
 
-        scroll_layout.addWidget(time_group)
+        layout.addWidget(time_group)
 
-        # 输出设置
-        output_group = QGroupBox(t("settings_output"))
-        output_layout = QVBoxLayout(output_group)
-        output_layout.setSpacing(14)
-
-        self.same_dir_check = QCheckBox(t("settings_same_dir"))
-        self.same_dir_check.setChecked(True)
-        self.same_dir_check.toggled.connect(self._on_same_dir_toggled)
-        output_layout.addWidget(self.same_dir_check)
-
-        dir_layout = QHBoxLayout()
-        dir_layout.setSpacing(10)
-        self.output_dir_edit = QLineEdit()
-        self.output_dir_edit.setPlaceholderText(t("settings_output_dir"))
-        self.output_dir_edit.setEnabled(False)
-        dir_layout.addWidget(self.output_dir_edit)
-
-        self.browse_btn = QPushButton(t("settings_browse"))
-        self.browse_btn.setEnabled(False)
-        self.browse_btn.setFixedWidth(80)
-        self.browse_btn.clicked.connect(self._browse_output_dir)
-        dir_layout.addWidget(self.browse_btn)
-        output_layout.addLayout(dir_layout)
-
-        output_layout.addSpacing(8)
-
-        output_layout.addWidget(QLabel(t("settings_filename_pattern")))
-        self.filename_pattern_edit = QLineEdit()
-        self.filename_pattern_edit.setText("{original}_stamped")
-        self.filename_pattern_edit.setToolTip(t("settings_filename_tooltip"))
-        output_layout.addWidget(self.filename_pattern_edit)
-
-        output_layout.addSpacing(8)
-
-        quality_layout = QHBoxLayout()
-        quality_layout.addWidget(QLabel(t("settings_jpeg_quality")))
-        quality_layout.addStretch()
-        self.quality_spin = QSpinBox()
-        self.quality_spin.setRange(1, 100)
-        self.quality_spin.setValue(95)
-        self.quality_spin.setSuffix(" %")
-        self.quality_spin.setFixedWidth(100)
-        quality_layout.addWidget(self.quality_spin)
-        output_layout.addLayout(quality_layout)
-
-        output_layout.addSpacing(8)
-
-        self.preserve_exif_check = QCheckBox(t("settings_preserve_exif"))
-        self.preserve_exif_check.setChecked(True)
-        output_layout.addWidget(self.preserve_exif_check)
-
-        self.overwrite_check = QCheckBox(t("settings_overwrite"))
-        output_layout.addWidget(self.overwrite_check)
-
-        scroll_layout.addWidget(output_group)
-
-        scroll_layout.addStretch()
-
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll, stretch=1)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(12)
-        btn_layout.addStretch()
-
-        self.reset_btn = QPushButton(t("settings_reset"))
-        self.reset_btn.clicked.connect(self._reset_settings)
-        btn_layout.addWidget(self.reset_btn)
-
-        self.save_btn = QPushButton(t("settings_save"))
-        self.save_btn.setObjectName("PrimaryButton")
-        self.save_btn.setMinimumWidth(100)
-        self.save_btn.clicked.connect(self._save_and_close)
-        btn_layout.addWidget(self.save_btn)
-
-        layout.addLayout(btn_layout)
+        layout.addStretch()
+        return widget
 
     def _load_settings(self):
         """加载设置"""
@@ -1062,16 +1362,31 @@ class SettingsDialog(QDialog):
                 self.language_combo.setCurrentIndex(i)
                 break
 
+        # 会话恢复
+        self.restore_session_check.setChecked(
+            self.config.get('general', {}).get('restore_last_session', False)
+        )
+
+        # 时间源
         primary = self.config.get('time_source', {}).get('primary', 'exif')
-        source_map = {'exif': 0, 'file_modified': 1, 'file_created': 2}
-        self.time_source_combo.setCurrentIndex(source_map.get(primary, 0))
+        if primary == 'exif':
+            self.time_exif_radio.setChecked(True)
+        elif primary == 'file_modified':
+            self.time_modified_radio.setChecked(True)
+        else:
+            self.time_created_radio.setChecked(True)
 
         self.fallback_check.setChecked(
             self.config.get('time_source', {}).get('fallback_enabled', True)
         )
 
+        # 输出设置
         output = self.config.get('output', {})
-        self.same_dir_check.setChecked(output.get('same_directory', True))
+        if output.get('same_directory', True):
+            self.same_dir_radio.setChecked(True)
+        else:
+            self.custom_dir_radio.setChecked(True)
+
         self.output_dir_edit.setText(output.get('custom_directory', ''))
         self.filename_pattern_edit.setText(output.get('filename_pattern', '{original}_stamped'))
         self.quality_spin.setValue(output.get('jpeg_quality', 95))
@@ -1083,17 +1398,26 @@ class SettingsDialog(QDialog):
         # 语言
         new_lang = self.language_combo.currentData()
         self.config['general']['language'] = new_lang
+        self.config['general']['restore_last_session'] = self.restore_session_check.isChecked()
         I18n.set_language(new_lang)
 
-        source_map = {0: 'exif', 1: 'file_modified', 2: 'file_created'}
+        # 时间源
+        if self.time_exif_radio.isChecked():
+            primary = 'exif'
+        elif self.time_modified_radio.isChecked():
+            primary = 'file_modified'
+        else:
+            primary = 'file_created'
+
         self.config['time_source'] = {
-            'primary': source_map.get(self.time_source_combo.currentIndex(), 'exif'),
+            'primary': primary,
             'fallback_enabled': self.fallback_check.isChecked(),
             'fallback_to': 'file_modified'
         }
 
+        # 输出设置
         self.config['output'] = {
-            'same_directory': self.same_dir_check.isChecked(),
+            'same_directory': self.same_dir_radio.isChecked(),
             'custom_directory': self.output_dir_edit.text(),
             'filename_pattern': self.filename_pattern_edit.text() or '{original}_stamped',
             'jpeg_quality': self.quality_spin.value(),
@@ -1109,9 +1433,11 @@ class SettingsDialog(QDialog):
         self.config = self.config_manager.get_default()
         self._load_settings()
 
-    def _on_same_dir_toggled(self, checked: bool):
-        self.output_dir_edit.setEnabled(not checked)
-        self.browse_btn.setEnabled(not checked)
+    def _on_dir_option_changed(self):
+        """目录选项变化"""
+        enabled = self.custom_dir_radio.isChecked()
+        self.output_dir_edit.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
 
     def _browse_output_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, t("settings_browse"))
@@ -1119,7 +1445,6 @@ class SettingsDialog(QDialog):
             self.output_dir_edit.setText(dir_path)
 
     def get_config(self) -> dict:
-        """获取当前配置"""
         return self.config
 
 
@@ -1131,76 +1456,60 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("about_title"))
-        self.setFixedSize(450, 600)
+        self.setFixedSize(420, 480)
         self.setStyleSheet(LIGHTROOM_STYLE)
 
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(0)
 
-        # Logo - 使用 QLabel 并确保不被裁剪
+        # Logo
         logo_label = QLabel()
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setMinimumHeight(140)
-        logo_label.setMaximumHeight(140)
+        logo_label.setFixedHeight(100)
         logo_path = get_base_path() / "assets" / "logo.png"
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
             scaled_pixmap = pixmap.scaled(
-                QSize(128, 128),
+                QSize(80, 80),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             logo_label.setPixmap(scaled_pixmap)
         else:
             logo_label.setText("📷")
-            logo_label.setStyleSheet("font-size: 72px;")
+            logo_label.setStyleSheet("font-size: 48px;")
         layout.addWidget(logo_label)
 
-        layout.addSpacing(20)
+        layout.addSpacing(16)
 
         # 软件名称
         name_label = QLabel("Photo Timestamper")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("""
-            QLabel {
-                font-size: 24px;
-                font-weight: bold;
-                color: #ffffff;
-                background: transparent;
-            }
-        """)
-        name_label.setFixedHeight(36)
+        name_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(name_label)
 
-        layout.addSpacing(8)
-
-        # 中文名
-        cn_name_label = QLabel(t("app_name_cn"))
-        cn_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cn_name_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                color: #808080;
-                background: transparent;
-            }
-        """)
-        cn_name_label.setFixedHeight(24)
-        layout.addWidget(cn_name_label)
-
-        layout.addSpacing(12)
+        layout.addSpacing(4)
 
         # 版本
         version_label = QLabel(t("about_version", version=__version__))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("color: #a0a0a0; font-size: 13px; background: transparent;")
-        version_label.setFixedHeight(24)
+        version_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
         layout.addWidget(version_label)
 
-        layout.addSpacing(24)
+        layout.addSpacing(12)
+
+        # 描述
+        desc_label = QLabel(t("about_description"))
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setStyleSheet("color: #808080; font-size: 11px;")
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        layout.addSpacing(20)
 
         # 分隔线
         separator = QFrame()
@@ -1209,57 +1518,60 @@ class AboutDialog(QDialog):
         separator.setFixedHeight(1)
         layout.addWidget(separator)
 
-        layout.addSpacing(24)
+        layout.addSpacing(20)
 
         # 作者
-        author_label = QLabel(t("about_author", author=__author__))
-        author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_label.setStyleSheet("color: #c0c0c0; font-size: 14px; background: transparent;")
-        author_label.setFixedHeight(28)
-        layout.addWidget(author_label)
+        author_title = QLabel(t("about_author"))
+        author_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_title.setStyleSheet("color: #808080; font-size: 10px;")
+        layout.addWidget(author_title)
 
-        layout.addSpacing(16)
-
-        # 协作者标题
-        collab_title = QLabel(t("about_collaborators"))
-        collab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        collab_title.setStyleSheet("color: #808080; font-size: 11px; background: transparent;")
-        collab_title.setFixedHeight(20)
-        layout.addWidget(collab_title)
-
-        layout.addSpacing(6)
-
-        # 协作者名单
-        collab_names = QLabel(" • ".join(__collaborators__))
-        collab_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        collab_names.setStyleSheet("color: #a0a0a0; font-size: 13px; background: transparent;")
-        collab_names.setFixedHeight(24)
-        layout.addWidget(collab_names)
-
-        layout.addSpacing(16)
-
-        # 许可证
-        license_label = QLabel(t("about_license"))
-        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        license_label.setStyleSheet("color: #808080; font-size: 12px; background: transparent;")
-        license_label.setFixedHeight(24)
-        layout.addWidget(license_label)
-
-        layout.addStretch()
-
-        # GitHub 链接
-        github_btn = QPushButton(t("about_github"))
-        github_btn.setObjectName("PrimaryButton")
-        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        github_btn.setFixedHeight(44)
-        github_btn.clicked.connect(self._open_github)
-        layout.addWidget(github_btn)
+        author_name = QLabel(__author__)
+        author_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_name.setStyleSheet("color: #c0c0c0; font-size: 13px;")
+        layout.addWidget(author_name)
 
         layout.addSpacing(12)
 
+        # 协作者
+        collab_title = QLabel(t("about_collaborators"))
+        collab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        collab_title.setStyleSheet("color: #808080; font-size: 10px;")
+        layout.addWidget(collab_title)
+
+        collab_names = QLabel(" · ".join(__collaborators__))
+        collab_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        collab_names.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        layout.addWidget(collab_names)
+
+        layout.addSpacing(12)
+
+        # 许可证
+        license_title = QLabel(t("about_license"))
+        license_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_title.setStyleSheet("color: #808080; font-size: 10px;")
+        layout.addWidget(license_title)
+
+        license_type = QLabel(t("about_license_type"))
+        license_type.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_type.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        layout.addWidget(license_type)
+
+        layout.addStretch()
+
+        # GitHub 按钮
+        github_btn = QPushButton(t("about_github"))
+        github_btn.setObjectName("PrimaryButton")
+        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        github_btn.setFixedHeight(36)
+        github_btn.clicked.connect(self._open_github)
+        layout.addWidget(github_btn)
+
+        layout.addSpacing(8)
+
         # 关闭按钮
         close_btn = QPushButton(t("about_close"))
-        close_btn.setFixedHeight(44)
+        close_btn.setFixedHeight(36)
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
 
@@ -1276,7 +1588,7 @@ class ImportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("import_title"))
-        self.setFixedSize(420, 240)
+        self.setFixedSize(380, 220)
         self.setStyleSheet(LIGHTROOM_STYLE)
 
         self.selected_files: list[str] = []
@@ -1286,40 +1598,37 @@ class ImportDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(18)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(14)
 
-        # 说明
         info_label = QLabel(t("import_desc"))
-        info_label.setStyleSheet("font-size: 14px; color: #e0e0e0;")
+        info_label.setStyleSheet("font-size: 13px; color: #e0e0e0;")
         layout.addWidget(info_label)
 
-        # 递归选项
         self.recursive_check = QCheckBox(t("import_recursive"))
         self.recursive_check.setChecked(True)
         layout.addWidget(self.recursive_check)
 
         layout.addStretch()
 
-        # 按钮
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(12)
+        btn_layout.setSpacing(10)
 
         self.file_btn = QPushButton(t("import_select_files"))
-        self.file_btn.setMinimumHeight(40)
+        self.file_btn.setMinimumHeight(36)
         self.file_btn.clicked.connect(self._select_files)
         btn_layout.addWidget(self.file_btn)
 
         self.folder_btn = QPushButton(t("import_select_folder"))
         self.folder_btn.setObjectName("PrimaryButton")
-        self.folder_btn.setMinimumHeight(40)
+        self.folder_btn.setMinimumHeight(36)
         self.folder_btn.clicked.connect(self._select_folder)
         btn_layout.addWidget(self.folder_btn)
 
         layout.addLayout(btn_layout)
 
         cancel_btn = QPushButton(t("import_cancel"))
-        cancel_btn.setMinimumHeight(36)
+        cancel_btn.setMinimumHeight(32)
         cancel_btn.clicked.connect(self.reject)
         layout.addWidget(cancel_btn)
 
@@ -1350,7 +1659,7 @@ class ImportDialog(QDialog):
 # ==================== 主窗口 ====================
 
 class MainWindow(QMainWindow):
-    """主窗口 - Lightroom 风格三栏布局"""
+    """主窗口"""
 
     def __init__(self):
         super().__init__()
@@ -1360,24 +1669,29 @@ class MainWindow(QMainWindow):
         self.style_manager = StyleManager()
 
         # 设置语言
-        saved_lang = self.config.get('general', {}).get('language', '')
+        saved_lang = self.config.get('general', {}).get('language', 'zh-CN')
         if saved_lang:
             I18n.set_language(saved_lang)
 
         self.processing_thread: ProcessingThread | None = None
-        self._has_unsaved_content = False
+        self._menu_created = False
 
         self._init_ui()
+        self._setup_menu()
         self._setup_shortcuts()
         self._load_ui_state()
 
         # 首次运行检查
         if self.config_manager.is_first_run():
             QTimer.singleShot(100, self._show_language_selection)
+        else:
+            # 恢复上次会话
+            if self.config.get('general', {}).get('restore_last_session', False):
+                QTimer.singleShot(200, self._restore_last_session)
 
     def _init_ui(self):
         self.setWindowTitle(t("app_name"))
-        self.setMinimumSize(1280, 720)
+        self.setMinimumSize(1200, 700)
 
         # 设置应用图标
         icon_path = get_base_path() / "assets" / "logo.ico"
@@ -1416,7 +1730,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.result_preview)
 
         # 设置分割比例
-        splitter.setSizes([300, 490, 490])
+        splitter.setSizes([280, 460, 460])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
@@ -1424,107 +1738,136 @@ class MainWindow(QMainWindow):
         # 状态栏
         self.statusBar().showMessage(t("msg_ready"))
 
+    def _setup_menu(self):
+        """设置菜单栏"""
+        # 清除现有菜单
+        menubar = self.menuBar()
+        menubar.clear()
+
+        # 文件菜单
+        file_menu = menubar.addMenu(t("menu_file"))
+
+        import_action = QAction(t("menu_import"), self)
+        import_action.setShortcut("Ctrl+O")
+        import_action.triggered.connect(self._show_import_dialog)
+        file_menu.addAction(import_action)
+
+        import_folder_action = QAction(t("menu_import_folder"), self)
+        import_folder_action.setShortcut("Ctrl+Shift+O")
+        import_folder_action.triggered.connect(self._import_folder)
+        file_menu.addAction(import_folder_action)
+
+        file_menu.addSeparator()
+
+        clear_action = QAction(t("menu_clear_list"), self)
+        clear_action.setShortcut("Ctrl+Shift+Delete")
+        clear_action.triggered.connect(self._clear_files)
+        file_menu.addAction(clear_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction(t("menu_exit"), self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # 编辑菜单
+        edit_menu = menubar.addMenu(t("menu_edit"))
+
+        select_all_action = QAction(t("menu_select_all"), self)
+        select_all_action.setShortcut("Ctrl+A")
+        select_all_action.triggered.connect(self._select_all)
+        edit_menu.addAction(select_all_action)
+
+        deselect_action = QAction(t("menu_deselect_all"), self)
+        deselect_action.triggered.connect(self._deselect_all)
+        edit_menu.addAction(deselect_action)
+
+        edit_menu.addSeparator()
+
+        remove_action = QAction(t("menu_remove_selected"), self)
+        remove_action.setShortcut("Delete")
+        remove_action.triggered.connect(self._remove_selected)
+        edit_menu.addAction(remove_action)
+
+        edit_menu.addSeparator()
+
+        settings_action = QAction(t("menu_settings"), self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._show_settings)
+        edit_menu.addAction(settings_action)
+
+        # 帮助菜单
+        help_menu = menubar.addMenu(t("menu_help"))
+
+        about_action = QAction(t("menu_about"), self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+        self._menu_created = True
+
     def _setup_shortcuts(self):
         """设置快捷键"""
-        # 导入 Ctrl+I
-        import_shortcut = QShortcut(QKeySequence("Ctrl+I"), self)
-        import_shortcut.activated.connect(self._show_import_dialog)
-
-        # 清空 Ctrl+Shift+C
-        clear_shortcut = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
-        clear_shortcut.activated.connect(self._clear_files)
-
         # 处理 Ctrl+Enter
         process_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
         process_shortcut.activated.connect(self._start_processing)
-
-        # 设置 Ctrl+,
-        settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
-        settings_shortcut.activated.connect(self._show_settings)
-
-        # 退出 Ctrl+Q
-        quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self)
-        quit_shortcut.activated.connect(self.close)
-
-        # 全选 Ctrl+A
-        select_all_shortcut = QShortcut(QKeySequence("Ctrl+A"), self)
-        select_all_shortcut.activated.connect(self._select_all_images)
-
-        # 删除选中 Delete
-        delete_shortcut = QShortcut(QKeySequence("Delete"), self)
-        delete_shortcut.activated.connect(self._remove_selected)
 
     def _create_left_panel(self) -> QWidget:
         """创建左侧控制面板"""
         panel = QWidget()
         panel.setObjectName("LeftPanel")
-        panel.setFixedWidth(300)
+        panel.setFixedWidth(280)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        # 顶部按钮栏
-        top_btn_layout = QHBoxLayout()
-        top_btn_layout.setSpacing(8)
+        # 图片列表标题和信息
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
 
-        self.settings_btn = QPushButton("设置")
-        self.settings_btn.setFixedHeight(36)
-        self.settings_btn.setToolTip(t("tooltip_settings"))
-        self.settings_btn.clicked.connect(self._show_settings)
-        top_btn_layout.addWidget(self.settings_btn)
-
-        self.about_btn = QPushButton("关于")
-        self.about_btn.setFixedHeight(36)
-        self.about_btn.clicked.connect(self._show_about)
-        top_btn_layout.addWidget(self.about_btn)
-
-        top_btn_layout.addStretch()
-        layout.addLayout(top_btn_layout)
-
-        # === 图片列表（移到前面）===
         list_label = QLabel(t("panel_image_list"))
         list_label.setObjectName("PanelTitle")
-        layout.addWidget(list_label)
+        header_layout.addWidget(list_label)
 
+        header_layout.addStretch()
+
+        self.list_info_label = QLabel(t("image_count", count=0))
+        self.list_info_label.setStyleSheet("color: #606060; font-size: 10px;")
+        header_layout.addWidget(self.list_info_label)
+
+        layout.addLayout(header_layout)
+
+        # 图片列表
         self.image_list = ImageListWidget()
         self.image_list.files_dropped.connect(self._on_files_dropped)
         self.image_list.selection_changed.connect(self._on_selection_changed)
+        self.image_list.check_changed.connect(self._update_list_info)
         layout.addWidget(self.image_list, stretch=1)
 
-        # 列表信息和清空按钮
-        list_info_layout = QHBoxLayout()
-        list_info_layout.setSpacing(8)
+        # 列表操作按钮
+        list_btn_layout = QHBoxLayout()
+        list_btn_layout.setSpacing(6)
 
-        self.list_info_label = QLabel(t("image_count", count=0))
-        self.list_info_label.setStyleSheet("color: #606060; font-size: 11px;")
-        list_info_layout.addWidget(self.list_info_label)
+        self.add_btn = QPushButton(t("btn_add_images"))
+        self.add_btn.setObjectName("SmallButton")
+        self.add_btn.setToolTip(t("tooltip_add_images"))
+        self.add_btn.clicked.connect(self._show_import_dialog)
+        list_btn_layout.addWidget(self.add_btn)
 
-        list_info_layout.addStretch()
+        self.select_all_btn = QPushButton(t("btn_select_all"))
+        self.select_all_btn.setObjectName("SmallButton")
+        self.select_all_btn.clicked.connect(self.image_list.check_all)
+        list_btn_layout.addWidget(self.select_all_btn)
 
         self.clear_btn = QPushButton(t("btn_clear_list"))
-        self.clear_btn.setFixedHeight(32)
-        self.clear_btn.setToolTip(t("tooltip_clear"))
+        self.clear_btn.setObjectName("SmallButton")
         self.clear_btn.clicked.connect(self._clear_files)
-        list_info_layout.addWidget(self.clear_btn)
+        list_btn_layout.addWidget(self.clear_btn)
 
-        layout.addLayout(list_info_layout)
+        layout.addLayout(list_btn_layout)
 
-        layout.addSpacing(8)
-
-        # === 导入区域（移到后面）===
-        import_label = QLabel(t("panel_import"))
-        import_label.setObjectName("PanelTitle")
-        layout.addWidget(import_label)
-
-        self.import_btn = QPushButton(t("btn_add_images"))
-        self.import_btn.setObjectName("PrimaryButton")
-        self.import_btn.setMinimumHeight(44)
-        self.import_btn.setToolTip(t("tooltip_import"))
-        self.import_btn.clicked.connect(self._show_import_dialog)
-        layout.addWidget(self.import_btn)
-
-        layout.addSpacing(8)
+        layout.addSpacing(6)
 
         # 水印样式
         style_label = QLabel(t("panel_watermark_style"))
@@ -1532,21 +1875,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(style_label)
 
         self.style_combo = QComboBox()
-        self.style_combo.setMinimumHeight(44)
+        self.style_combo.setMinimumHeight(34)
+        self.style_combo.setToolTip(t("tooltip_style"))
         self._populate_styles()
         self.style_combo.currentTextChanged.connect(self._on_style_changed)
         layout.addWidget(self.style_combo)
 
-        layout.addSpacing(16)
+        layout.addSpacing(8)
 
         # 处理进度
         self.progress_widget = QWidget()
         progress_layout = QVBoxLayout(self.progress_widget)
         progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(10)
+        progress_layout.setSpacing(8)
 
         self.progress_label = QLabel(t("processing"))
-        self.progress_label.setStyleSheet("color: #a0a0a0;")
+        self.progress_label.setStyleSheet("color: #a0a0a0; font-size: 11px;")
         progress_layout.addWidget(self.progress_label)
 
         self.progress_bar = QProgressBar()
@@ -1554,7 +1898,7 @@ class MainWindow(QMainWindow):
 
         self.cancel_btn = QPushButton(t("btn_cancel"))
         self.cancel_btn.setObjectName("DangerButton")
-        self.cancel_btn.setMinimumHeight(40)
+        self.cancel_btn.setMinimumHeight(34)
         self.cancel_btn.clicked.connect(self._cancel_processing)
         progress_layout.addWidget(self.cancel_btn)
 
@@ -1562,9 +1906,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_widget)
 
         # 执行按钮
-        self.process_btn = QPushButton(t("btn_process_selected"))
+        self.process_btn = QPushButton(t("btn_process"))
         self.process_btn.setObjectName("PrimaryButton")
-        self.process_btn.setMinimumHeight(48)
+        self.process_btn.setMinimumHeight(40)
         self.process_btn.setToolTip(t("tooltip_process"))
         self.process_btn.clicked.connect(self._start_processing)
         layout.addWidget(self.process_btn)
@@ -1575,22 +1919,18 @@ class MainWindow(QMainWindow):
         """创建预览面板"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
 
-        # 标题
         title_label = QLabel(title)
         title_label.setObjectName("PanelTitle")
         layout.addWidget(title_label)
 
-        # 存储标题标签引用
         panel.title_label = title_label
 
-        # 预览区域
         preview = PreviewWidget()
         layout.addWidget(preview, stretch=1)
 
-        # 存储预览控件引用
         panel.preview_widget = preview
 
         return panel
@@ -1622,16 +1962,27 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             files = dialog.get_files()
             if files:
-                added, duplicates = self.image_list.add_files(files)
-                self._update_list_info()
-                self._has_unsaved_content = True
+                self._add_files(files)
 
-                if duplicates > 0:
-                    self.statusBar().showMessage(
-                        f"{t('msg_added_images', count=added)} | {t('msg_duplicate_skipped', count=duplicates)}"
-                    )
-                else:
-                    self.statusBar().showMessage(t('msg_added_images', count=added))
+    def _import_folder(self):
+        """直接导入文件夹"""
+        folder = QFileDialog.getExistingDirectory(self, t("import_select_folder"))
+        if folder:
+            files = scan_images(folder, recursive=True)
+            if files:
+                self._add_files(files)
+
+    def _add_files(self, files: list[str]):
+        """添加文件"""
+        added, duplicates = self.image_list.add_files(files)
+        self._update_list_info()
+
+        if duplicates > 0:
+            self.statusBar().showMessage(
+                f"{t('msg_added_images', count=added)} | {t('msg_duplicate_skipped', count=duplicates)}"
+            )
+        else:
+            self.statusBar().showMessage(t('msg_added_images', count=added))
 
     def _show_settings(self):
         """显示设置对话框"""
@@ -1639,6 +1990,7 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.config = self.config_manager.load()
             self._update_ui_texts()
+            self.statusBar().showMessage(t("msg_settings_saved"))
 
     def _show_about(self):
         """显示关于对话框"""
@@ -1647,16 +1999,7 @@ class MainWindow(QMainWindow):
 
     def _on_files_dropped(self, files: list[str]):
         """处理拖放的文件"""
-        added, duplicates = self.image_list.add_files(files)
-        self._update_list_info()
-        self._has_unsaved_content = True
-
-        if duplicates > 0:
-            self.statusBar().showMessage(
-                f"{t('msg_added_images', count=added)} | {t('msg_duplicate_skipped', count=duplicates)}"
-            )
-        else:
-            self.statusBar().showMessage(t('msg_added_images', count=added))
+        self._add_files(files)
 
     def _on_selection_changed(self, selected: list[str]):
         """选择变化时更新预览"""
@@ -1676,16 +2019,15 @@ class MainWindow(QMainWindow):
             self._update_preview(selected[0])
 
     def _update_preview(self, filepath: str):
-        """更新预览 - 高分辨率"""
+        """更新预览"""
         try:
-            # 显示原图
             image = Image.open(filepath)
             if image.mode != 'RGB':
                 image = image.convert('RGB')
 
-            # 原图预览 - 提升3倍分辨率
+            # 原图预览
             original_preview = image.copy()
-            original_preview.thumbnail((4800, 3600), Image.Resampling.LANCZOS)  # 原来是 1600x1200
+            original_preview.thumbnail((3600, 2700), Image.Resampling.LANCZOS)
             self.original_preview.preview_widget.set_image(original_preview)
 
             # 效果预览
@@ -1700,7 +2042,7 @@ class MainWindow(QMainWindow):
             timestamp = extractor.extract(filepath)
 
             renderer = WatermarkRenderer(style, self.style_manager.fonts_dir)
-            result_preview = renderer.render_preview(image, timestamp, (4800, 3600))  # 原来是 1600x1200
+            result_preview = renderer.render_preview(image, timestamp, (3600, 2700))
             self.result_preview.preview_widget.set_image(result_preview)
 
         except Exception as e:
@@ -1710,34 +2052,51 @@ class MainWindow(QMainWindow):
 
     def _clear_files(self):
         """清空文件列表"""
-        self.image_list.clear_files()
-        self.original_preview.preview_widget.clear_image()
-        self.result_preview.preview_widget.clear_image()
-        self._update_list_info()
-        self._has_unsaved_content = False
+        if self.image_list.get_count() > 0:
+            self.image_list.clear_files()
+            self.original_preview.preview_widget.clear_image()
+            self.result_preview.preview_widget.clear_image()
+            self._update_list_info()
+            self.statusBar().showMessage(t("msg_cleared"))
 
-    def _select_all_images(self):
-        """全选图片"""
+    def _select_all(self):
+        """全选"""
         self.image_list.list_widget.selectAll()
+
+    def _deselect_all(self):
+        """取消全选"""
+        self.image_list.list_widget.clearSelection()
 
     def _remove_selected(self):
         """移除选中图片"""
-        self.image_list.remove_selected()
-        self._update_list_info()
+        count = len(self.image_list.get_selected_files())
+        if count > 0:
+            self.image_list.remove_selected()
+            self._update_list_info()
+            self.statusBar().showMessage(t("msg_removed", count=count))
 
     def _update_list_info(self):
         """更新列表信息"""
-        count = self.image_list.get_count()
-        self.list_info_label.setText(t("image_count", count=count))
+        total = self.image_list.get_count()
+        checked = self.image_list.get_checked_count()
+
+        if checked > 0:
+            self.list_info_label.setText(t("image_selected_count", selected=checked, total=total))
+            self.process_btn.setText(t("btn_process_selected"))
+        else:
+            self.list_info_label.setText(t("image_count", count=total))
+            self.process_btn.setText(t("btn_process"))
 
     def _start_processing(self):
         """开始处理"""
-        selected = self.image_list.get_selected_files()
-        if not selected:
-            # 如果没有选中，处理全部
-            selected = self.image_list.get_all_files()
+        # 优先处理勾选的，没有勾选则处理全部
+        checked = self.image_list.get_checked_files()
+        if checked:
+            files_to_process = checked
+        else:
+            files_to_process = self.image_list.get_all_files()
 
-        if not selected:
+        if not files_to_process:
             QMessageBox.warning(self, t("app_name"), t("msg_no_images"))
             return
 
@@ -1745,7 +2104,7 @@ class MainWindow(QMainWindow):
 
         processor = BatchProcessor(self.config, self.style_manager)
 
-        self.processing_thread = ProcessingThread(processor, selected, style_name)
+        self.processing_thread = ProcessingThread(processor, files_to_process, style_name)
         self.processing_thread.progress.connect(self._on_progress)
         self.processing_thread.preview.connect(self._on_processing_preview)
         self.processing_thread.finished.connect(self._on_finished)
@@ -1798,28 +2157,32 @@ class MainWindow(QMainWindow):
         """处理错误"""
         self._set_processing_state(False)
         self.statusBar().showMessage(t("msg_process_error"))
-        QMessageBox.critical(self, t("app_name"), f"{t('msg_process_error')}: {error}")
+        QMessageBox.critical(self, t("error_title"), f"{t('msg_process_error')}: {error}")
 
     def _set_processing_state(self, processing: bool):
         """设置处理状态"""
         self.process_btn.setVisible(not processing)
         self.progress_widget.setVisible(processing)
-        self.import_btn.setEnabled(not processing)
+        self.add_btn.setEnabled(not processing)
         self.clear_btn.setEnabled(not processing)
+        self.select_all_btn.setEnabled(not processing)
         self.style_combo.setEnabled(not processing)
-        self.settings_btn.setEnabled(not processing)
 
         if not processing:
             self.progress_bar.setValue(0)
 
     def _update_ui_texts(self):
-        """更新所有 UI 文本（语言切换时）"""
+        """更新所有 UI 文本"""
         self.setWindowTitle(t("app_name"))
 
-        # 更新面板标题（需要查找所有 PanelTitle 标签）
-        self.import_btn.setText(t("btn_add_images"))
+        # 重新创建菜单
+        self._setup_menu()
+
+        # 更新左侧面板
+        self.add_btn.setText(t("btn_add_images"))
+        self.select_all_btn.setText(t("btn_select_all"))
         self.clear_btn.setText(t("btn_clear_list"))
-        self.process_btn.setText(t("btn_process_selected"))
+        self.process_btn.setText(t("btn_process"))
         self.cancel_btn.setText(t("btn_cancel"))
         self.progress_label.setText(t("processing"))
 
@@ -1834,10 +2197,10 @@ class MainWindow(QMainWindow):
             self.result_preview.title_label.setText(t("preview_result"))
 
         # 更新工具提示
-        self.import_btn.setToolTip(t("tooltip_import"))
+        self.add_btn.setToolTip(t("tooltip_add_images"))
         self.clear_btn.setToolTip(t("tooltip_clear"))
         self.process_btn.setToolTip(t("tooltip_process"))
-        self.settings_btn.setToolTip(t("tooltip_settings"))
+        self.style_combo.setToolTip(t("tooltip_style"))
 
         self.statusBar().showMessage(t("msg_ready"))
 
@@ -1854,6 +2217,23 @@ class MainWindow(QMainWindow):
         """保存UI状态"""
         self.config['ui']['window_geometry'] = self.saveGeometry().toHex().data().decode()
         self.config_manager.save(self.config)
+
+    def _restore_last_session(self):
+        """恢复上次会话"""
+        files = self.config_manager.get_last_session_files()
+        if files:
+            # 过滤掉不存在的文件
+            existing_files = [f for f in files if Path(f).exists()]
+            if existing_files:
+                self._add_files(existing_files)
+
+    def _save_session(self):
+        """保存当前会话"""
+        if self.config.get('general', {}).get('restore_last_session', False):
+            files = self.image_list.get_all_files()
+            self.config_manager.save_session_files(files)
+        else:
+            self.config_manager.clear_session_files()
 
     def closeEvent(self, event):
         """窗口关闭事件"""
@@ -1872,19 +2252,8 @@ class MainWindow(QMainWindow):
             self.processing_thread.cancel()
             self.processing_thread.wait()
 
-        # 检查是否有未保存的内容
-        elif self._has_unsaved_content and self.image_list.get_count() > 0:
-            reply = QMessageBox.question(
-                self,
-                t("msg_confirm_exit"),
-                t("msg_exit_unsaved"),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                event.ignore()
-                return
-
+        # 保存会话和UI状态
+        self._save_session()
         self._save_ui_state()
         event.accept()
 

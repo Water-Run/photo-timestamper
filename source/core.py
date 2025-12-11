@@ -1,11 +1,10 @@
+# core.py
 """
 Photo-Timestamper 核心处理模块
 """
 
 import os
-import json
 import logging
-import configparser
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -13,6 +12,7 @@ from typing import Callable
 import yaml
 from PIL import Image, ImageDraw, ImageFont
 import piexif
+import simpsave as ss
 
 # 配置日志
 logging.basicConfig(
@@ -25,6 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# simpsave 配置文件
+SS_CONFIG_FILE = ':ss:photo_timestamper_config.json'
+SS_SESSION_FILE = ':ss:photo_timestamper_session.json'
+
 
 def get_base_path() -> Path:
     """获取程序基础路径"""
@@ -32,121 +36,109 @@ def get_base_path() -> Path:
 
 
 class ConfigManager:
-    """配置管理器 - 使用INI格式"""
+    """配置管理器 - 使用 simpsave"""
 
     DEFAULT_CONFIG = {
         "general": {
-            "recursive_scan": "true",
-            "language": "",
-            "first_run": "true"
+            "language": "zh-CN",
+            "first_run": True,
+            "restore_last_session": False
         },
         "time_source": {
             "primary": "exif",
-            "fallback_enabled": "true",
+            "fallback_enabled": True,
             "fallback_to": "file_modified"
         },
         "output": {
-            "same_directory": "true",
+            "same_directory": True,
             "custom_directory": "",
             "filename_pattern": "{original}_stamped",
-            "jpeg_quality": "95",
-            "preserve_exif": "true",
-            "overwrite_existing": "false"
+            "jpeg_quality": 95,
+            "preserve_exif": True,
+            "overwrite_existing": False
         },
         "ui": {
             "last_style": "佳能",
-            "preview_enabled": "true",
+            "preview_enabled": True,
             "window_geometry": ""
         }
     }
 
-    def __init__(self, config_path: str | None = None):
-        if config_path is None:
-            self.config_path = get_base_path() / "config.ini"
-        else:
-            self.config_path = Path(config_path)
-        self._config: configparser.ConfigParser | None = None
+    def __init__(self):
+        self._config = None
 
     def load(self) -> dict:
-        """加载配置，不存在则返回默认配置"""
+        """加载配置"""
         if self._config is not None:
-            return self._to_dict()
+            return self._config
 
-        self._config = configparser.ConfigParser()
-
-        if self.config_path.exists():
+        try:
+            # 检查配置是否存在
+            if ss.has('config', file=SS_CONFIG_FILE):
+                stored_config = ss.read('config', file=SS_CONFIG_FILE)
+                if stored_config is not None:
+                    self._config = self._merge_with_defaults(stored_config)
+                    logger.info("配置已从 simpsave 加载")
+                else:
+                    self._config = self._get_default_copy()
+                    self._save_to_file(self._config)
+                    logger.info("已创建默认配置")
+            else:
+                # 配置不存在，创建默认配置
+                self._config = self._get_default_copy()
+                self._save_to_file(self._config)
+                logger.info("已创建默认配置")
+        except FileNotFoundError:
+            # 文件不存在，创建默认配置
+            self._config = self._get_default_copy()
+            self._save_to_file(self._config)
+            logger.info("配置文件不存在，已创建默认配置")
+        except Exception as e:
+            logger.warning(f"加载配置时出现问题，使用默认配置: {e}")
+            self._config = self._get_default_copy()
             try:
-                self._config.read(self.config_path, encoding='utf-8')
-                self._merge_defaults()
-                logger.info(f"配置文件已加载: {self.config_path}")
-            except Exception as e:
-                logger.error(f"加载配置文件失败: {e}")
-                self._set_defaults()
-        else:
-            self._set_defaults()
-            self._save_config()
-            logger.info("已创建默认配置文件")
+                self._save_to_file(self._config)
+            except Exception:
+                pass
 
-        return self._to_dict()
+        return self._config
+
+    def _save_to_file(self, config: dict) -> None:
+        """保存配置到文件（内部方法）"""
+        try:
+            ss.write('config', config, file=SS_CONFIG_FILE)
+        except Exception as e:
+            logger.error(f"保存配置失败: {e}")
 
     def save(self, config: dict) -> None:
-        """保存配置到文件"""
+        """保存配置"""
         try:
-            if self._config is None:
-                self._config = configparser.ConfigParser()
-
-            for section, values in config.items():
-                if not self._config.has_section(section):
-                    self._config.add_section(section)
-                for key, value in values.items():
-                    self._config.set(section, key, str(value))
-
-            self._save_config()
-            logger.info("配置文件已保存")
+            ss.write('config', config, file=SS_CONFIG_FILE)
+            self._config = config
+            logger.info("配置已保存")
         except Exception as e:
-            logger.error(f"保存配置文件失败: {e}")
+            logger.error(f"保存配置失败: {e}")
             raise
 
-    def _save_config(self):
-        """写入配置文件"""
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            self._config.write(f)
+    def _get_default_copy(self) -> dict:
+        """获取默认配置的深拷贝"""
+        import copy
+        return copy.deepcopy(self.DEFAULT_CONFIG)
+
+    def _merge_with_defaults(self, stored: dict) -> dict:
+        """合并存储的配置与默认配置"""
+        import copy
+        result = copy.deepcopy(self.DEFAULT_CONFIG)
+        for section, values in stored.items():
+            if section in result and isinstance(values, dict):
+                result[section].update(values)
+            else:
+                result[section] = values
+        return result
 
     def get_default(self) -> dict:
         """获取默认配置"""
-        return {section: dict(values) for section, values in self.DEFAULT_CONFIG.items()}
-
-    def _set_defaults(self):
-        """设置默认配置"""
-        for section, values in self.DEFAULT_CONFIG.items():
-            if not self._config.has_section(section):
-                self._config.add_section(section)
-            for key, value in values.items():
-                self._config.set(section, key, value)
-
-    def _merge_defaults(self):
-        """合并默认配置（添加缺失项）"""
-        for section, values in self.DEFAULT_CONFIG.items():
-            if not self._config.has_section(section):
-                self._config.add_section(section)
-            for key, value in values.items():
-                if not self._config.has_option(section, key):
-                    self._config.set(section, key, value)
-
-    def _to_dict(self) -> dict:
-        """转换为字典格式"""
-        result = {}
-        for section in self._config.sections():
-            result[section] = {}
-            for key, value in self._config.items(section):
-                # 转换布尔值和数字
-                if value.lower() in ('true', 'false'):
-                    result[section][key] = value.lower() == 'true'
-                elif value.isdigit():
-                    result[section][key] = int(value)
-                else:
-                    result[section][key] = value
-        return result
+        return self._get_default_copy()
 
     def is_first_run(self) -> bool:
         """检查是否首次运行"""
@@ -158,6 +150,31 @@ class ConfigManager:
         config = self.load()
         config['general']['first_run'] = False
         self.save(config)
+
+    def get_last_session_files(self) -> list:
+        """获取上次会话的文件列表"""
+        try:
+            if ss.has('last_session_files', file=SS_SESSION_FILE):
+                files = ss.read('last_session_files', file=SS_SESSION_FILE)
+                return files if files else []
+            return []
+        except (FileNotFoundError, Exception):
+            return []
+
+    def save_session_files(self, files: list) -> None:
+        """保存当前会话的文件列表"""
+        try:
+            ss.write('last_session_files', files, file=SS_SESSION_FILE)
+        except Exception as e:
+            logger.error(f"保存会话文件失败: {e}")
+
+    def clear_session_files(self) -> None:
+        """清除会话文件"""
+        try:
+            if ss.has('last_session_files', file=SS_SESSION_FILE):
+                ss.remove('last_session_files', file=SS_SESSION_FILE)
+        except (FileNotFoundError, Exception):
+            pass
 
 
 class StyleManager:
@@ -615,7 +632,7 @@ class BatchProcessor:
                     image = Image.open(image_path)
                     timestamp = processor.time_extractor.extract(image_path)
                     renderer = WatermarkRenderer(style, self.style_manager.fonts_dir)
-                    preview = renderer.render_preview(image, timestamp, (3600, 2700))  # 原来是 1200x900
+                    preview = renderer.render_preview(image, timestamp, (3600, 2700))
                     preview_callback(str(image_path), preview)
                 except Exception as e:
                     logger.debug(f"生成预览失败: {e}")

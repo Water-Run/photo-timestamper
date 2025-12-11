@@ -1,3 +1,4 @@
+# main.py
 """
 Photo-Timestamper 入口点
 """
