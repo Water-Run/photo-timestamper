@@ -3,6 +3,8 @@ PyInstaller 打包脚本
 Photo-Timestamper Windows 桌面应用打包
 """
 
+r"""python build.py""" # 执行打包
+
 import PyInstaller.__main__
 import os
 import sys

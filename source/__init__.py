@@ -2,8 +2,9 @@
 Photo-Timestamper - 照片时间戳水印工具
 """
 
-__version__ = "1.0.0"
-__author__ = "Your Name"
+__version__ = "1.1"
+__author__ = "WaterRun"
+__collaborators__ = ["Claude-Opus-4.5", "Nano-Banana-Pro"]
 
 from .core import (
     ConfigManager,
