@@ -1,8 +1,3 @@
-meta:
-  name: "小米现代"
-  description: "模仿小米手机的中文日期格式"
-  version: "1.0"
-
 font:
   file: "Roboto-Mono.ttf"
   size_ratio: 0.022

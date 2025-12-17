@@ -1,8 +1,3 @@
-meta:
-  name: "富士经典"
-  description: "模仿Fujifilm相机的橙色日期印记"
-  version: "1.0"
-
 font:
   file: "DS-Digital.ttf"
   size_ratio: 0.025
@@ -10,7 +5,7 @@ font:
   italic: false
 
 color:
-  text: "#FF8C00"
+  text: "#FF6B35"
   shadow: "#000000"
   shadow_opacity: 0.3
 
@@ -21,7 +16,7 @@ position:
 
 format:
   date_pattern: "%y %m %d"
-  prefix: ""
+  prefix: "'"
   suffix: ""
 
 effects:

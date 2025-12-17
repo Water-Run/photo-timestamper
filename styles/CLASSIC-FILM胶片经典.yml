@@ -1,8 +1,3 @@
-meta:
-  name: "松下经典"
-  description: "模仿Panasonic相机的黄色日期印记"
-  version: "1.0"
-
 font:
   file: "DS-Digital.ttf"
   size_ratio: 0.025
@@ -10,7 +5,7 @@ font:
   italic: false
 
 color:
-  text: "#FFCC00"
+  text: "#FF6B35"
   shadow: "#000000"
   shadow_opacity: 0.3
 
@@ -20,7 +15,7 @@ position:
   margin_y_ratio: 0.02
 
 format:
-  date_pattern: "%y/%m/%d"
+  date_pattern: "%y %m %d"
   prefix: "'"
   suffix: ""
 

@@ -1,16 +1,11 @@
-meta:
-  name: "默认红"
-  description: "红色经典风格"
-  version: "1.0"
-
 font:
-  file: "Courier-Prime.ttf"
+  file: "DS-Digital.ttf"
   size_ratio: 0.025
   weight: "bold"
   italic: false
 
 color:
-  text: "#FF0000"
+  text: "#FFCC00"
   shadow: "#000000"
   shadow_opacity: 0.3
 
@@ -20,7 +15,7 @@ position:
   margin_y_ratio: 0.02
 
 format:
-  date_pattern: "%y.%m.%d"
+  date_pattern: "%y/%m/%d"
   prefix: "'"
   suffix: ""
 

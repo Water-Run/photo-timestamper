@@ -1,18 +1,13 @@
-meta:
-  name: "佳能经典"
-  description: "模仿Canon相机的橙红色日期印记"
-  version: "1.0"
-
 font:
-  file: "DS-Digital.ttf"
+  file: "Roboto-Mono.ttf"
   size_ratio: 0.025
-  weight: "bold"
+  weight: "normal"
   italic: false
 
 color:
-  text: "#FF6B35"
+  text: "#FFFFFF"
   shadow: "#000000"
-  shadow_opacity: 0.3
+  shadow_opacity: 0.5
 
 position:
   anchor: "bottom-right"
@@ -20,8 +15,8 @@ position:
   margin_y_ratio: 0.02
 
 format:
-  date_pattern: "%y %m %d"
-  prefix: "'"
+  date_pattern: "%Y-%m-%d"
+  prefix: ""
   suffix: ""
 
 effects:

@@ -1,18 +1,13 @@
-meta:
-  name: "索尼现代"
-  description: "模仿Sony相机的白色日期印记"
-  version: "1.0"
-
 font:
-  file: "Roboto-Mono.ttf"
+  file: "Courier-Prime.ttf"
   size_ratio: 0.025
-  weight: "normal"
+  weight: "bold"
   italic: false
 
 color:
-  text: "#FFFFFF"
+  text: "#FFA500"
   shadow: "#000000"
-  shadow_opacity: 0.5
+  shadow_opacity: 0.3
 
 position:
   anchor: "bottom-right"
@@ -20,8 +15,8 @@ position:
   margin_y_ratio: 0.02
 
 format:
-  date_pattern: "%Y-%m-%d"
-  prefix: ""
+  date_pattern: "%y.%m.%d"
+  prefix: "'"
   suffix: ""
 
 effects:
