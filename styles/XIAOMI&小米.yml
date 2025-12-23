@@ -1,26 +1,33 @@
 font:
-  file: "Roboto-Mono.ttf"
-  size_ratio: 0.022
-  weight: "normal"
-  italic: false
-
+  value:
+    file: Roboto-Mono.ttf
+    size_ratio: 0.022
+    weight: normal
+    italic: false
+  type: dict
 color:
-  text: "#FFFFFF"
-  shadow: "#000000"
-  shadow_opacity: 0.5
-
+  value:
+    text: '#FFFFFF'
+    shadow: '#000000'
+    shadow_opacity: 0.5
+  type: dict
 position:
-  anchor: "bottom-right"
-  margin_x_ratio: 0.02
-  margin_y_ratio: 0.02
-
+  value:
+    anchor: bottom-right
+    margin_x_ratio: 0.02
+    margin_y_ratio: 0.02
+  type: dict
 format:
-  date_pattern: "%Y年%m月%d日"
-  prefix: ""
-  suffix: ""
-
+  value:
+    date_pattern: '%Y年%m月%d日'
+    prefix: ''
+    suffix: ''
+  type: dict
 effects:
-  shadow_enabled: true
-  shadow_offset_x: 2
-  shadow_offset_y: 2
-  opacity: 1.0
+  value:
+    shadow_enabled: true
+    shadow_offset_x: 2
+    shadow_offset_y: 2
+    opacity: 1.0
+  type: dict
+  

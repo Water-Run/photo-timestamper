@@ -1,26 +1,33 @@
 font:
-  file: "DS-Digital.ttf"
-  size_ratio: 0.025
-  weight: "bold"
-  italic: false
-
+  value:
+    file: DS-Digital.ttf
+    size_ratio: 0.025
+    weight: bold
+    italic: false
+  type: dict
 color:
-  text: "#FF6B35"
-  shadow: "#000000"
-  shadow_opacity: 0.3
-
+  value:
+    text: '#FF6B35'
+    shadow: '#000000'
+    shadow_opacity: 0.3
+  type: dict
 position:
-  anchor: "bottom-right"
-  margin_x_ratio: 0.02
-  margin_y_ratio: 0.02
-
+  value:
+    anchor: bottom-right
+    margin_x_ratio: 0.02
+    margin_y_ratio: 0.02
+  type: dict
 format:
-  date_pattern: "%y %m %d"
-  prefix: "'"
-  suffix: ""
-
+  value:
+    date_pattern: '%y %m %d'
+    prefix: ''''
+    suffix: ''
+  type: dict
 effects:
-  shadow_enabled: true
-  shadow_offset_x: 2
-  shadow_offset_y: 2
-  opacity: 1.0
+  value:
+    shadow_enabled: true
+    shadow_offset_x: 2
+    shadow_offset_y: 2
+    opacity: 1.0
+  type: dict
+  

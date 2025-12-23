@@ -1,29 +1,28 @@
 # ui.py
 """
 Photo-Timestamper PyQt6 用户界面
-Lightroom 风格专业界面 - 重构版 v1.2
+Lightroom 风格专业界面 - QtWebEngine 版本 v2.0
 """
 
 import sys
 import os
 import subprocess
+import json
+import base64
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from io import BytesIO
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QComboBox, QProgressBar, QFileDialog,
-    QListWidget, QListWidgetItem, QSplitter, QFrame, QMessageBox,
-    QCheckBox, QLineEdit, QSpinBox, QGroupBox, QDialog,
-    QAbstractItemView, QMenu, QScrollArea, QSizePolicy,
-    QTabWidget, QRadioButton, QButtonGroup
+    QFileDialog, QMessageBox, QDialog, QLabel, QPushButton,
+    QComboBox, QSplitter
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import (
-    QPixmap, QImage, QDragEnterEvent, QDropEvent, QIcon,
-    QAction, QShortcut, QKeySequence, QPainter, QColor, QPen, QBrush
-)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, pyqtSlot, QObject, QTimer
+from PyQt6.QtGui import QIcon, QShortcut, QKeySequence
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebChannel import QWebChannel
 
 from PIL import Image
 
@@ -33,495 +32,6 @@ from .core import (
 )
 from .i18n import I18n, t, LANGUAGE_NAMES
 from . import __version__, __author__, __collaborators__
-
-
-# ==================== 主题颜色定义 ====================
-
-LIGHTROOM_BLUE = "#0a84ff"
-LIGHTROOM_BLUE_HOVER = "#409cff"
-LIGHTROOM_BLUE_PRESSED = "#0066cc"
-CHECK_GREEN = "#34c759"
-
-LIGHTROOM_STYLE = f"""
-/* 主窗口背景 */
-QMainWindow {{
-    background-color: #1e1e1e;
-}}
-
-QWidget {{
-    background-color: #1e1e1e;
-    color: #e0e0e0;
-    font-family: "Microsoft YaHei", "Segoe UI", "SF Pro Display", sans-serif;
-    font-size: 12px;
-}}
-
-/* 菜单栏 */
-QMenuBar {{
-    background-color: #2d2d2d;
-    border-bottom: 1px solid #3d3d3d;
-    padding: 2px 0;
-    spacing: 0;
-}}
-
-QMenuBar::item {{
-    background-color: transparent;
-    padding: 6px 12px;
-    border-radius: 4px;
-    margin: 2px 2px;
-}}
-
-QMenuBar::item:selected {{
-    background-color: #404040;
-}}
-
-QMenuBar::item:pressed {{
-    background-color: {LIGHTROOM_BLUE};
-}}
-
-QMenu {{
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    border-radius: 8px;
-    padding: 6px;
-}}
-
-QMenu::item {{
-    padding: 8px 32px 8px 12px;
-    border-radius: 4px;
-    margin: 2px 4px;
-}}
-
-QMenu::item:selected {{
-    background-color: {LIGHTROOM_BLUE};
-}}
-
-QMenu::separator {{
-    height: 1px;
-    background-color: #3d3d3d;
-    margin: 6px 8px;
-}}
-
-/* 分割器 */
-QSplitter::handle {{
-    background-color: #3d3d3d;
-}}
-
-QSplitter::handle:horizontal {{
-    width: 1px;
-}}
-
-/* 左侧面板 */
-#LeftPanel {{
-    background-color: #252525;
-    border-right: 1px solid #3d3d3d;
-}}
-
-/* 面板标题 */
-#PanelTitle {{
-    color: #909090;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 8px 0 6px 0;
-    background-color: transparent;
-}}
-
-/* 分组框 */
-QGroupBox {{
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    border-radius: 6px;
-    margin-top: 16px;
-    padding: 16px 12px 12px 12px;
-    font-weight: 600;
-    font-size: 11px;
-}}
-
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 12px;
-    padding: 0 6px;
-    color: #a0a0a0;
-    background-color: #2d2d2d;
-}}
-
-/* 标签页 */
-QTabWidget::pane {{
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    border-radius: 6px;
-    padding: 12px;
-}}
-
-QTabBar::tab {{
-    background-color: #353535;
-    border: 1px solid #3d3d3d;
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
-    padding: 8px 20px;
-    margin-right: 2px;
-    color: #a0a0a0;
-}}
-
-QTabBar::tab:selected {{
-    background-color: #2d2d2d;
-    color: #ffffff;
-}}
-
-QTabBar::tab:hover:!selected {{
-    background-color: #404040;
-}}
-
-/* 按钮样式 */
-QPushButton {{
-    background-color: #3d3d3d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 12px;
-    color: #e0e0e0;
-    font-weight: 500;
-    min-height: 20px;
-}}
-
-QPushButton:hover {{
-    background-color: #4d4d4d;
-    border-color: #5d5d5d;
-}}
-
-QPushButton:pressed {{
-    background-color: #2d2d2d;
-}}
-
-QPushButton:disabled {{
-    background-color: #2d2d2d;
-    color: #606060;
-    border-color: #3d3d3d;
-}}
-
-/* 主要操作按钮 */
-QPushButton#PrimaryButton {{
-    background-color: {LIGHTROOM_BLUE};
-    border: none;
-    color: white;
-    font-weight: 600;
-}}
-
-QPushButton#PrimaryButton:hover {{
-    background-color: {LIGHTROOM_BLUE_HOVER};
-}}
-
-QPushButton#PrimaryButton:pressed {{
-    background-color: {LIGHTROOM_BLUE_PRESSED};
-}}
-
-QPushButton#PrimaryButton:disabled {{
-    background-color: #404040;
-    color: #808080;
-}}
-
-/* 小型按钮 */
-QPushButton#SmallButton {{
-    padding: 4px 10px;
-    font-size: 11px;
-    min-height: 18px;
-}}
-
-/* 危险操作按钮 */
-QPushButton#DangerButton {{
-    background-color: #d32f2f;
-    border: none;
-    color: white;
-}}
-
-QPushButton#DangerButton:hover {{
-    background-color: #e53935;
-}}
-
-/* 下拉框 */
-QComboBox {{
-    background-color: #3d3d3d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 10px;
-    padding-right: 28px;
-    color: #e0e0e0;
-    min-height: 20px;
-}}
-
-QComboBox:hover {{
-    border-color: #5d5d5d;
-}}
-
-QComboBox:focus {{
-    border-color: {LIGHTROOM_BLUE};
-}}
-
-QComboBox::drop-down {{
-    border: none;
-    width: 24px;
-}}
-
-QComboBox::down-arrow {{
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #808080;
-    margin-right: 8px;
-}}
-
-QComboBox QAbstractItemView {{
-    background-color: #2d2d2d;
-    border: 1px solid #4d4d4d;
-    border-radius: 6px;
-    selection-background-color: {LIGHTROOM_BLUE};
-    outline: none;
-    padding: 4px;
-}}
-
-QComboBox QAbstractItemView::item {{
-    padding: 8px 12px;
-    min-height: 24px;
-    border-radius: 4px;
-}}
-
-QComboBox QAbstractItemView::item:hover {{
-    background-color: #404040;
-}}
-
-/* 列表控件 */
-QListWidget {{
-    background-color: #2a2a2a;
-    border: 1px solid #3d3d3d;
-    border-radius: 6px;
-    outline: none;
-    padding: 4px;
-}}
-
-QListWidget::item {{
-    background-color: transparent;
-    border-radius: 4px;
-    padding: 2px 4px;
-    margin: 1px 0;
-}}
-
-QListWidget::item:hover {{
-    background-color: #353535;
-}}
-
-QListWidget::item:selected {{
-    background-color: #404040;
-}}
-
-/* 滚动条 */
-QScrollBar:vertical {{
-    background-color: transparent;
-    width: 10px;
-    margin: 0;
-}}
-
-QScrollBar::handle:vertical {{
-    background-color: #4d4d4d;
-    min-height: 30px;
-    border-radius: 5px;
-    margin: 2px;
-}}
-
-QScrollBar::handle:vertical:hover {{
-    background-color: #5d5d5d;
-}}
-
-QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical {{
-    height: 0;
-}}
-
-QScrollBar:horizontal {{
-    background-color: transparent;
-    height: 10px;
-    margin: 0;
-}}
-
-QScrollBar::handle:horizontal {{
-    background-color: #4d4d4d;
-    min-width: 30px;
-    border-radius: 5px;
-    margin: 2px;
-}}
-
-QScrollBar::handle:horizontal:hover {{
-    background-color: #5d5d5d;
-}}
-
-QScrollBar::add-line:horizontal,
-QScrollBar::sub-line:horizontal {{
-    width: 0;
-}}
-
-/* 进度条 */
-QProgressBar {{
-    background-color: #2d2d2d;
-    border: none;
-    border-radius: 4px;
-    height: 8px;
-    text-align: center;
-}}
-
-QProgressBar::chunk {{
-    background-color: {LIGHTROOM_BLUE};
-    border-radius: 4px;
-}}
-
-/* 复选框 */
-QCheckBox {{
-    spacing: 8px;
-    color: #e0e0e0;
-}}
-
-QCheckBox::indicator {{
-    width: 16px;
-    height: 16px;
-    border-radius: 3px;
-    border: 1px solid #4d4d4d;
-    background-color: #2d2d2d;
-}}
-
-QCheckBox::indicator:hover {{
-    border-color: #5d5d5d;
-}}
-
-QCheckBox::indicator:checked {{
-    background-color: {LIGHTROOM_BLUE};
-    border-color: {LIGHTROOM_BLUE};
-}}
-
-/* 单选框 */
-QRadioButton {{
-    spacing: 8px;
-    color: #e0e0e0;
-}}
-
-QRadioButton::indicator {{
-    width: 16px;
-    height: 16px;
-    border-radius: 8px;
-    border: 1px solid #4d4d4d;
-    background-color: #2d2d2d;
-}}
-
-QRadioButton::indicator:hover {{
-    border-color: #5d5d5d;
-}}
-
-QRadioButton::indicator:checked {{
-    background-color: {LIGHTROOM_BLUE};
-    border-color: {LIGHTROOM_BLUE};
-}}
-
-/* 输入框 */
-QLineEdit {{
-    background-color: #2d2d2d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 10px;
-    color: #e0e0e0;
-    selection-background-color: {LIGHTROOM_BLUE};
-}}
-
-QLineEdit:hover {{
-    border-color: #5d5d5d;
-}}
-
-QLineEdit:focus {{
-    border-color: {LIGHTROOM_BLUE};
-}}
-
-QLineEdit:disabled {{
-    background-color: #252525;
-    color: #606060;
-}}
-
-/* 数字输入框 */
-QSpinBox {{
-    background-color: #2d2d2d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 10px;
-    color: #e0e0e0;
-    min-height: 20px;
-}}
-
-QSpinBox:hover {{
-    border-color: #5d5d5d;
-}}
-
-QSpinBox:focus {{
-    border-color: {LIGHTROOM_BLUE};
-}}
-
-QSpinBox::up-button,
-QSpinBox::down-button {{
-    background-color: #3d3d3d;
-    border: none;
-    width: 20px;
-    border-radius: 2px;
-}}
-
-QSpinBox::up-button:hover,
-QSpinBox::down-button:hover {{
-    background-color: #4d4d4d;
-}}
-
-/* 标签 */
-QLabel {{
-    color: #c0c0c0;
-    background-color: transparent;
-}}
-
-/* 预览区域 */
-#PreviewPanel {{
-    background-color: #1a1a1a;
-    border: 1px solid #2d2d2d;
-    border-radius: 8px;
-}}
-
-/* 对话框 */
-QDialog {{
-    background-color: #2d2d2d;
-}}
-
-/* 状态栏 */
-QStatusBar {{
-    background-color: #252525;
-    border-top: 1px solid #3d3d3d;
-    color: #808080;
-    padding: 4px 12px;
-    font-size: 11px;
-}}
-
-/* 工具提示 */
-QToolTip {{
-    background-color: #3d3d3d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 10px;
-    color: #e0e0e0;
-}}
-
-/* 搜索框样式 */
-#SearchBox {{
-    background-color: #2d2d2d;
-    border: 1px solid #4d4d4d;
-    border-radius: 4px;
-    padding: 6px 10px;
-    color: #e0e0e0;
-}}
-
-#SearchBox:focus {{
-    border-color: {LIGHTROOM_BLUE};
-}}
-"""
 
 
 # ==================== 处理线程 ====================
@@ -563,434 +73,177 @@ class ProcessingThread(QThread):
         self.processor.cancel()
 
 
-# ==================== 自定义勾选框绘制 ====================
+# ==================== Web Bridge ====================
 
-class CheckmarkWidget(QWidget):
-    """自定义勾选标记组件"""
-    
-    clicked = pyqtSignal()
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._checked = False
-        self.setFixedSize(28, 28)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-    
-    def is_checked(self) -> bool:
-        return self._checked
-    
-    def set_checked(self, checked: bool):
-        self._checked = checked
-        self.update()
-    
-    def toggle(self):
-        self._checked = not self._checked
-        self.update()
-        self.clicked.emit()
-    
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.toggle()
-    
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # 绘制圆形背景
-        rect = self.rect().adjusted(2, 2, -2, -2)
-        
-        if self._checked:
-            # 已勾选：绿色填充
-            painter.setBrush(QBrush(QColor(CHECK_GREEN)))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(rect)
-            
-            # 绘制白色勾号
-            painter.setPen(QPen(QColor("#ffffff"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            
-            # 勾号路径
-            cx, cy = rect.center().x(), rect.center().y()
-            # 勾号的三个点
-            p1_x, p1_y = cx - 5, cy
-            p2_x, p2_y = cx - 1, cy + 4
-            p3_x, p3_y = cx + 6, cy - 4
-            
-            painter.drawLine(int(p1_x), int(p1_y), int(p2_x), int(p2_y))
-            painter.drawLine(int(p2_x), int(p2_y), int(p3_x), int(p3_y))
-        else:
-            # 未勾选：空心圆
-            painter.setBrush(QBrush(QColor("#3d3d3d")))
-            painter.setPen(QPen(QColor("#5d5d5d"), 2))
-            painter.drawEllipse(rect)
+class WebBridge(QObject):
+    """Python 与 JavaScript 的桥接对象"""
 
+    # 信号定义
+    filesAdded = pyqtSignal(str)  # JSON string
+    previewUpdated = pyqtSignal(str, str)  # original, result (base64)
+    progressUpdated = pyqtSignal(int, int, str)
+    processingFinished = pyqtSignal(str)  # JSON result
+    statusMessage = pyqtSignal(str)
+    uiTextsUpdated = pyqtSignal(str)  # JSON translations
 
-# ==================== 列表项组件 ====================
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self._file_list: list[dict] = []  # {path, name, checked, thumbnail}
+        self._thumbnails: dict[str, str] = {}  # path -> base64
 
-class ImageListItem(QWidget):
-    """图片列表项 - 带明显的勾选状态"""
+    @pyqtSlot(result=str)
+    def getTranslations(self) -> str:
+        """获取所有翻译文本"""
+        translations = {
+            "app_name": t("app_name"),
+            "panel_image_list": t("panel_image_list"),
+            "panel_watermark_style": t("panel_watermark_style"),
+            "search_placeholder": t("search_placeholder"),
+            "image_count": t("image_count", count=0),
+            "btn_add_images": t("btn_add_images"),
+            "btn_add_folder": t("btn_add_folder"),
+            "btn_clear_list": t("btn_clear_list"),
+            "btn_select_all": t("btn_select_all"),
+            "btn_process": t("btn_process"),
+            "btn_process_selected": t("btn_process_selected"),
+            "btn_cancel": t("btn_cancel"),
+            "preview_original": t("preview_original"),
+            "preview_result": t("preview_result"),
+            "preview_no_image": t("preview_no_image"),
+            "drop_hint": t("drop_hint"),
+            "processing": t("processing"),
+            "msg_ready": t("msg_ready"),
+            "ctx_check_selected": t("ctx_check_selected"),
+            "ctx_uncheck_selected": t("ctx_uncheck_selected"),
+            "ctx_select_all": t("ctx_select_all"),
+            "ctx_deselect_all": t("ctx_deselect_all"),
+            "ctx_open_file": t("ctx_open_file"),
+            "ctx_open_folder": t("ctx_open_folder"),
+            "ctx_remove_selected": t("ctx_remove_selected"),
+            "ctx_clear_all": t("ctx_clear_all"),
+        }
+        return json.dumps(translations, ensure_ascii=False)
 
-    checked_changed = pyqtSignal(str, bool)
+    @pyqtSlot(result=str)
+    def getStyles(self) -> str:
+        """获取可用样式列表"""
+        styles = self.main_window.style_manager.list_styles()
+        last_style = self.main_window.config.get('ui', {}).get('last_style', '佳能')
+        return json.dumps({
+            "styles": styles,
+            "current": last_style if last_style in styles else (styles[0] if styles else "")
+        }, ensure_ascii=False)
 
-    def __init__(self, filename: str, filepath: str, parent=None):
-        super().__init__(parent)
-        self.filepath = filepath
-        self.filename = filename
-        self._thumbnail: QPixmap | None = None
+    @pyqtSlot(result=str)
+    def getFileList(self) -> str:
+        """获取文件列表"""
+        return json.dumps(self._file_list, ensure_ascii=False)
 
-        self.setFixedHeight(64)
+    @pyqtSlot()
+    def requestAddFiles(self):
+        """请求添加文件"""
+        self.main_window._show_import_dialog()
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(10)
+    @pyqtSlot()
+    def requestAddFolder(self):
+        """请求添加文件夹"""
+        self.main_window._import_folder()
 
-        # 勾选标记
-        self.checkmark = CheckmarkWidget()
-        self.checkmark.clicked.connect(self._on_checkmark_clicked)
-        layout.addWidget(self.checkmark)
-
-        # 缩略图
-        self.thumb_label = QLabel()
-        self.thumb_label.setFixedSize(72, 54)
-        self.thumb_label.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border-radius: 3px;
-                border: 1px solid #3d3d3d;
-            }
-        """)
-        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.thumb_label)
-
-        # 文件名
-        self.name_label = QLabel(filename)
-        self.name_label.setStyleSheet("color: #e0e0e0; font-size: 12px;")
-        self.name_label.setWordWrap(False)
-        layout.addWidget(self.name_label, stretch=1)
-
-    def set_thumbnail(self, pixmap: QPixmap):
-        """设置缩略图"""
-        self._thumbnail = pixmap
-        scaled = pixmap.scaled(
-            70, 52,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.thumb_label.setPixmap(scaled)
-
-    def is_checked(self) -> bool:
-        return self.checkmark.is_checked()
-
-    def set_checked(self, checked: bool):
-        if self.checkmark.is_checked() != checked:
-            self.checkmark.set_checked(checked)
-            self.checked_changed.emit(self.filepath, checked)
-
-    def toggle_checked(self):
-        self.checkmark.toggle()
-
-    def _on_checkmark_clicked(self):
-        self.checked_changed.emit(self.filepath, self.checkmark.is_checked())
-
-
-# ==================== 图片列表组件 ====================
-
-class ImageListWidget(QFrame):
-    """图片列表组件"""
-
-    files_dropped = pyqtSignal(list)
-    selection_changed = pyqtSignal(list)
-    check_changed = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setObjectName("ImageListWidget")
-
-        self._file_items: dict[str, QListWidgetItem] = {}
-        self._item_widgets: dict[str, ImageListItem] = {}
-        self._thumbnails: dict[str, QPixmap] = {}
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        # 搜索框
-        self.search_box = QLineEdit()
-        self.search_box.setObjectName("SearchBox")
-        self.search_box.setPlaceholderText(t("search_placeholder"))
-        self.search_box.textChanged.connect(self._filter_list)
-        layout.addWidget(self.search_box)
-
-        # 列表控件
-        self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
-        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self.list_widget.setSpacing(1)
-        layout.addWidget(self.list_widget)
-
-        # 空状态提示
-        self.empty_label = QLabel(t("drop_hint"))
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet("""
-            QLabel {
-                color: #606060;
-                font-size: 13px;
-                padding: 40px;
-                line-height: 1.8;
-            }
-        """)
-        layout.addWidget(self.empty_label)
-
-        self._update_empty_state()
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self.setStyleSheet(f"#ImageListWidget {{ border: 2px dashed {LIGHTROOM_BLUE}; border-radius: 6px; }}")
-
-    def dragLeaveEvent(self, event):
-        self.setStyleSheet("")
-
-    def dropEvent(self, event: QDropEvent):
-        self.setStyleSheet("")
-        files = []
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if Path(path).is_dir():
-                files.extend(scan_images(path, recursive=True))
-            elif path.lower().endswith(('.jpg', '.jpeg')):
-                files.append(path)
-
-        if files:
-            self.files_dropped.emit(files)
-
-    def add_files(self, files: list[str]) -> tuple[int, int]:
-        """添加文件到列表"""
-        existing = set(self._file_items.keys())
-        added = 0
-        duplicates = 0
-
-        for filepath in files:
-            filename = Path(filepath).name
-
-            if filepath in existing or filename in [Path(p).name for p in existing]:
-                duplicates += 1
-                continue
-
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, filepath)
-            item.setSizeHint(QSize(0, 66))
-
-            item_widget = ImageListItem(filename, filepath)
-            item_widget.checked_changed.connect(self._on_item_checked)
-
-            self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, item_widget)
-
-            self._file_items[filepath] = item
-            self._item_widgets[filepath] = item_widget
-            existing.add(filepath)
-            added += 1
-
-            # 延迟加载缩略图
-            QTimer.singleShot(30 * added, lambda fp=filepath, w=item_widget: self._load_thumbnail(fp, w))
-
-        self._update_empty_state()
-        return added, duplicates
-
-    def _load_thumbnail(self, filepath: str, widget: ImageListItem):
-        """异步加载缩略图"""
-        try:
-            if filepath in self._thumbnails:
-                widget.set_thumbnail(self._thumbnails[filepath])
-                return
-
-            image = Image.open(filepath)
-            image.thumbnail((144, 108), Image.Resampling.LANCZOS)
-
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-
-            qimage = QImage(
-                image.tobytes(),
-                image.width,
-                image.height,
-                image.width * 3,
-                QImage.Format.Format_RGB888
-            )
-            pixmap = QPixmap.fromImage(qimage)
-
-            self._thumbnails[filepath] = pixmap
-            widget.set_thumbnail(pixmap)
-
-        except Exception as e:
-            logger.debug(f"加载缩略图失败: {e}")
-
-    def _on_item_checked(self, filepath: str, checked: bool):
-        """项目勾选状态变化"""
-        self.check_changed.emit()
-
-    def _on_item_double_clicked(self, item: QListWidgetItem):
-        """双击切换勾选状态"""
-        filepath = item.data(Qt.ItemDataRole.UserRole)
-        if filepath in self._item_widgets:
-            self._item_widgets[filepath].toggle_checked()
-
-    def get_all_files(self) -> list[str]:
-        """获取所有文件路径"""
-        return [
-            self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
-            for i in range(self.list_widget.count())
-            if not self.list_widget.item(i).isHidden()
-        ]
-
-    def get_checked_files(self) -> list[str]:
-        """获取已勾选的文件"""
-        checked = []
-        for filepath, widget in self._item_widgets.items():
-            if widget.is_checked():
-                checked.append(filepath)
-        return checked
-
-    def get_selected_files(self) -> list[str]:
-        """获取选中的文件（用于预览）"""
-        return [
-            item.data(Qt.ItemDataRole.UserRole)
-            for item in self.list_widget.selectedItems()
-        ]
-
-    def get_checked_count(self) -> int:
-        """获取已勾选数量"""
-        return len(self.get_checked_files())
-
-    def check_all(self):
-        """勾选所有"""
-        for widget in self._item_widgets.values():
-            widget.set_checked(True)
-        self.check_changed.emit()
-
-    def uncheck_all(self):
-        """取消所有勾选"""
-        for widget in self._item_widgets.values():
-            widget.set_checked(False)
-        self.check_changed.emit()
-
-    def check_selected(self):
-        """勾选选中项"""
-        for item in self.list_widget.selectedItems():
-            filepath = item.data(Qt.ItemDataRole.UserRole)
-            if filepath in self._item_widgets:
-                self._item_widgets[filepath].set_checked(True)
-        self.check_changed.emit()
-
-    def uncheck_selected(self):
-        """取消勾选选中项"""
-        for item in self.list_widget.selectedItems():
-            filepath = item.data(Qt.ItemDataRole.UserRole)
-            if filepath in self._item_widgets:
-                self._item_widgets[filepath].set_checked(False)
-        self.check_changed.emit()
-
-    def clear_files(self):
-        """清空列表"""
-        self.list_widget.clear()
-        self._file_items.clear()
-        self._item_widgets.clear()
+    @pyqtSlot()
+    def requestClearFiles(self):
+        """请求清空文件"""
+        self._file_list.clear()
         self._thumbnails.clear()
-        self._update_empty_state()
+        self.filesAdded.emit(json.dumps(self._file_list))
+        self.statusMessage.emit(t("msg_cleared"))
 
-    def remove_selected(self):
+    @pyqtSlot(str)
+    def setFileChecked(self, data: str):
+        """设置文件勾选状态"""
+        info = json.loads(data)
+        path = info.get('path')
+        checked = info.get('checked', False)
+        for item in self._file_list:
+            if item['path'] == path:
+                item['checked'] = checked
+                break
+
+    @pyqtSlot()
+    def checkAll(self):
+        """全选"""
+        for item in self._file_list:
+            item['checked'] = True
+        self.filesAdded.emit(json.dumps(self._file_list))
+
+    @pyqtSlot()
+    def uncheckAll(self):
+        """取消全选"""
+        for item in self._file_list:
+            item['checked'] = False
+        self.filesAdded.emit(json.dumps(self._file_list))
+
+    @pyqtSlot(str)
+    def checkSelected(self, selected_json: str):
+        """勾选选中项"""
+        selected = set(json.loads(selected_json))
+        for item in self._file_list:
+            if item['path'] in selected:
+                item['checked'] = True
+        self.filesAdded.emit(json.dumps(self._file_list))
+
+    @pyqtSlot(str)
+    def uncheckSelected(self, selected_json: str):
+        """取消勾选选中项"""
+        selected = set(json.loads(selected_json))
+        for item in self._file_list:
+            if item['path'] in selected:
+                item['checked'] = False
+        self.filesAdded.emit(json.dumps(self._file_list))
+
+    @pyqtSlot(str)
+    def removeSelected(self, selected_json: str):
         """移除选中项"""
-        for item in self.list_widget.selectedItems():
-            filepath = item.data(Qt.ItemDataRole.UserRole)
-            self._file_items.pop(filepath, None)
-            self._item_widgets.pop(filepath, None)
-            self._thumbnails.pop(filepath, None)
-            self.list_widget.takeItem(self.list_widget.row(item))
+        selected = set(json.loads(selected_json))
+        self._file_list = [item for item in self._file_list if item['path'] not in selected]
+        for path in selected:
+            self._thumbnails.pop(path, None)
+        self.filesAdded.emit(json.dumps(self._file_list))
+        self.statusMessage.emit(t("msg_removed", count=len(selected)))
 
-        self._update_empty_state()
+    @pyqtSlot(str)
+    def selectFile(self, filepath: str):
+        """选择文件进行预览"""
+        self.main_window._update_preview(filepath)
 
-    def get_count(self) -> int:
-        """获取文件数量"""
-        return self.list_widget.count()
+    @pyqtSlot(str)
+    def setStyle(self, style_name: str):
+        """设置当前样式"""
+        self.main_window.config['ui']['last_style'] = style_name
+        self.main_window.config_manager.save(self.main_window.config)
 
-    def _filter_list(self, text: str):
-        """根据搜索词过滤列表"""
-        text = text.lower()
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            filepath = item.data(Qt.ItemDataRole.UserRole)
-            filename = Path(filepath).name.lower()
-            item.setHidden(text not in filename)
+    @pyqtSlot(str)
+    def startProcessing(self, style_name: str):
+        """开始处理"""
+        checked = [item['path'] for item in self._file_list if item.get('checked')]
+        if checked:
+            files = checked
+        else:
+            files = [item['path'] for item in self._file_list]
 
-    def _update_empty_state(self):
-        """更新空状态显示"""
-        has_items = self.list_widget.count() > 0
-        self.empty_label.setVisible(not has_items)
-        self.list_widget.setVisible(has_items)
-        self.search_box.setVisible(has_items)
+        if not files:
+            QMessageBox.warning(self.main_window, t("app_name"), t("msg_no_images"))
+            return
 
-    def _on_selection_changed(self):
-        """选择变化时发送信号"""
-        selected = self.get_selected_files()
-        self.selection_changed.emit(selected)
+        self.main_window._start_processing_with_files(files, style_name)
 
-    def _show_context_menu(self, pos):
-        """显示右键菜单"""
-        menu = QMenu(self)
-        menu.setStyleSheet(LIGHTROOM_STYLE)
+    @pyqtSlot()
+    def cancelProcessing(self):
+        """取消处理"""
+        self.main_window._cancel_processing()
 
-        # 勾选操作
-        check_action = QAction(t("ctx_check_selected"), self)
-        check_action.triggered.connect(self.check_selected)
-        menu.addAction(check_action)
-
-        uncheck_action = QAction(t("ctx_uncheck_selected"), self)
-        uncheck_action.triggered.connect(self.uncheck_selected)
-        menu.addAction(uncheck_action)
-
-        menu.addSeparator()
-
-        # 选择操作
-        select_all_action = QAction(t("ctx_select_all"), self)
-        select_all_action.triggered.connect(self.list_widget.selectAll)
-        menu.addAction(select_all_action)
-
-        deselect_action = QAction(t("ctx_deselect_all"), self)
-        deselect_action.triggered.connect(self.list_widget.clearSelection)
-        menu.addAction(deselect_action)
-
-        menu.addSeparator()
-
-        # 文件操作
-        item = self.list_widget.itemAt(pos)
-        if item:
-            filepath = item.data(Qt.ItemDataRole.UserRole)
-
-            open_file_action = QAction(t("ctx_open_file"), self)
-            open_file_action.triggered.connect(lambda: self._open_file(filepath))
-            menu.addAction(open_file_action)
-
-            open_folder_action = QAction(t("ctx_open_folder"), self)
-            open_folder_action.triggered.connect(lambda: self._open_folder(filepath))
-            menu.addAction(open_folder_action)
-
-            menu.addSeparator()
-
-        remove_action = QAction(t("ctx_remove_selected"), self)
-        remove_action.triggered.connect(self.remove_selected)
-        menu.addAction(remove_action)
-
-        clear_action = QAction(t("ctx_clear_all"), self)
-        clear_action.triggered.connect(self.clear_files)
-        menu.addAction(clear_action)
-
-        menu.exec(self.list_widget.mapToGlobal(pos))
-
-    def _open_file(self, filepath: str):
+    @pyqtSlot(str)
+    def openFile(self, filepath: str):
         """打开文件"""
         try:
             if sys.platform == 'win32':
@@ -1002,7 +255,8 @@ class ImageListWidget(QFrame):
         except Exception as e:
             logger.error(f"打开文件失败: {e}")
 
-    def _open_folder(self, filepath: str):
+    @pyqtSlot(str)
+    def openFolder(self, filepath: str):
         """打开所在文件夹"""
         try:
             folder = str(Path(filepath).parent)
@@ -1015,141 +269,1042 @@ class ImageListWidget(QFrame):
         except Exception as e:
             logger.error(f"打开文件夹失败: {e}")
 
-    def update_texts(self):
-        """更新界面文本"""
-        self.search_box.setPlaceholderText(t("search_placeholder"))
-        self.empty_label.setText(t("drop_hint"))
+    @pyqtSlot()
+    def showSettings(self):
+        """显示设置"""
+        self.main_window._show_settings()
+
+    @pyqtSlot()
+    def showAbout(self):
+        """显示关于"""
+        self.main_window._show_about()
+
+    def add_files(self, files: list[str]) -> tuple[int, int]:
+        """添加文件到列表"""
+        existing = {item['path'] for item in self._file_list}
+        added = 0
+        duplicates = 0
+
+        for filepath in files:
+            if filepath in existing:
+                duplicates += 1
+                continue
+
+            filename = Path(filepath).name
+            self._file_list.append({
+                'path': filepath,
+                'name': filename,
+                'checked': False,
+                'thumbnail': ''
+            })
+            existing.add(filepath)
+            added += 1
+
+        # 异步加载缩略图
+        for item in self._file_list:
+            if not item['thumbnail'] and item['path'] not in self._thumbnails:
+                QTimer.singleShot(50, lambda p=item['path']: self._load_thumbnail(p))
+
+        self.filesAdded.emit(json.dumps(self._file_list))
+        return added, duplicates
+
+    def _load_thumbnail(self, filepath: str):
+        """加载缩略图"""
+        try:
+            if filepath in self._thumbnails:
+                return
+
+            image = Image.open(filepath)
+            image.thumbnail((144, 108), Image.Resampling.LANCZOS)
+
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            buffer = BytesIO()
+            image.save(buffer, format='JPEG', quality=80)
+            b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            self._thumbnails[filepath] = f"data:image/jpeg;base64,{b64}"
+
+            # 更新列表中的缩略图
+            for item in self._file_list:
+                if item['path'] == filepath:
+                    item['thumbnail'] = self._thumbnails[filepath]
+                    break
+
+            self.filesAdded.emit(json.dumps(self._file_list))
+
+        except Exception as e:
+            logger.debug(f"加载缩略图失败: {e}")
+
+    def get_all_files(self) -> list[str]:
+        """获取所有文件"""
+        return [item['path'] for item in self._file_list]
+
+    def get_checked_count(self) -> int:
+        """获取勾选数量"""
+        return sum(1 for item in self._file_list if item.get('checked'))
 
 
-# ==================== 预览组件 ====================
+# ==================== HTML 模板 ====================
 
-class PreviewWidget(QFrame):
-    """图片预览组件"""
+def get_html_content() -> str:
+    """生成完整的 HTML 内容"""
+    return '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Timestamper</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("PreviewPanel")
-        self.setMinimumSize(300, 200)
+        :root {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #252525;
+            --bg-tertiary: #2d2d2d;
+            --bg-hover: #353535;
+            --bg-active: #404040;
+            --border-color: #3d3d3d;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --text-muted: #606060;
+            --accent-blue: #0a84ff;
+            --accent-blue-hover: #409cff;
+            --accent-green: #34c759;
+            --accent-red: #d32f2f;
+        }
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        body {
+            font-family: "Microsoft YaHei", "Segoe UI", "SF Pro Display", sans-serif;
+            font-size: 12px;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
+        }
 
-        self.preview_label = QLabel()
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border-radius: 8px;
-                color: #606060;
-                font-size: 12px;
+        /* 主布局 */
+        .main-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 左侧面板 */
+        .left-panel {
+            width: 280px;
+            min-width: 280px;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+        }
+
+        .panel-title {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 8px 0 6px 0;
+        }
+
+        /* 列表头部 */
+        .list-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .list-info {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+
+        /* 搜索框 */
+        .search-box {
+            background-color: var(--bg-tertiary);
+            border: 1px solid #4d4d4d;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 12px;
+            width: 100%;
+            margin-bottom: 8px;
+            outline: none;
+        }
+
+        .search-box:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .search-box::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* 文件列表 */
+        .file-list-container {
+            flex: 1;
+            background-color: #2a2a2a;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px;
+        }
+
+        .file-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .file-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .file-list::-webkit-scrollbar-thumb {
+            background-color: #4d4d4d;
+            border-radius: 4px;
+        }
+
+        .file-list::-webkit-scrollbar-thumb:hover {
+            background-color: #5d5d5d;
+        }
+
+        /* 空状态提示 */
+        .empty-hint {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 13px;
+            text-align: center;
+            line-height: 1.8;
+            padding: 40px;
+        }
+
+        /* 文件项 */
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 2px;
+            gap: 10px;
+        }
+
+        .file-item:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .file-item.selected {
+            background-color: var(--bg-active);
+        }
+
+        .file-item.drag-over {
+            border: 2px dashed var(--accent-blue);
+        }
+
+        /* 勾选标记 */
+        .checkmark {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid #5d5d5d;
+            background-color: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.15s ease;
+        }
+
+        .checkmark:hover {
+            border-color: #7d7d7d;
+        }
+
+        .checkmark.checked {
+            background-color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .checkmark.checked::after {
+            content: '';
+            width: 6px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+            margin-top: -2px;
+        }
+
+        /* 缩略图 */
+        .thumbnail {
+            width: 72px;
+            height: 54px;
+            background-color: #1a1a1a;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .thumbnail img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .thumbnail-placeholder {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+
+        /* 文件名 */
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+        }
+
+        /* 按钮组 */
+        .button-group {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        /* 按钮 */
+        .btn {
+            background-color: var(--bg-tertiary);
+            border: 1px solid #4d4d4d;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: var(--text-primary);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            flex: 1;
+        }
+
+        .btn:hover {
+            background-color: #4d4d4d;
+            border-color: #5d5d5d;
+        }
+
+        .btn:active {
+            background-color: var(--bg-tertiary);
+        }
+
+        .btn:disabled {
+            background-color: var(--bg-tertiary);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-blue);
+            border: none;
+            color: white;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-blue-hover);
+        }
+
+        .btn-primary:disabled {
+            background-color: #404040;
+            color: #808080;
+        }
+
+        .btn-danger {
+            background-color: var(--accent-red);
+            border: none;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #e53935;
+        }
+
+        .btn-large {
+            padding: 10px 16px;
+            font-size: 13px;
+            min-height: 40px;
+        }
+
+        /* 样式选择器 */
+        .style-section {
+            margin-top: 12px;
+        }
+
+        .style-select {
+            width: 100%;
+            background-color: var(--bg-tertiary);
+            border: 1px solid #4d4d4d;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23808080' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+        }
+
+        .style-select:hover {
+            border-color: #5d5d5d;
+        }
+
+        .style-select:focus {
+            border-color: var(--accent-blue);
+        }
+
+        /* 进度区域 */
+        .progress-section {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .progress-section.visible {
+            display: block;
+        }
+
+        .progress-label {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background-color: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--accent-blue);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        /* 处理按钮区域 */
+        .process-section {
+            margin-top: auto;
+            padding-top: 12px;
+        }
+
+        /* 预览区域 */
+        .preview-container {
+            flex: 1;
+            display: flex;
+            gap: 0;
+        }
+
+        .preview-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            min-width: 0;
+        }
+
+        .preview-panel:first-child {
+            border-right: 1px solid var(--border-color);
+        }
+
+        .preview-area {
+            flex: 1;
+            background-color: #1a1a1a;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .preview-area img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .preview-placeholder {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* 右键菜单 */
+        .context-menu {
+            position: fixed;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px;
+            min-width: 180px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+        }
+
+        .context-menu.visible {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--accent-blue);
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background-color: var(--border-color);
+            margin: 6px 8px;
+        }
+
+        /* 拖放覆盖层 */
+        .drop-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(10, 132, 255, 0.1);
+            border: 3px dashed var(--accent-blue);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            pointer-events: none;
+        }
+
+        .drop-overlay.visible {
+            display: flex;
+        }
+
+        .drop-overlay-text {
+            background-color: var(--bg-tertiary);
+            padding: 20px 40px;
+            border-radius: 8px;
+            font-size: 16px;
+            color: var(--accent-blue);
+        }
+
+        /* 状态栏 */
+        .status-bar {
+            height: 28px;
+            background-color: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            font-size: 11px;
+            color: var(--text-muted);
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- 左侧面板 -->
+        <div class="left-panel">
+            <div class="list-header">
+                <span class="panel-title" id="panelTitle">图片列表</span>
+                <span class="list-info" id="listInfo">共 0 张图片</span>
+            </div>
+
+            <input type="text" class="search-box" id="searchBox" placeholder="搜索图片...">
+
+            <div class="file-list-container">
+                <div class="file-list" id="fileList">
+                    <div class="empty-hint" id="emptyHint">
+                        将图片或文件夹拖放到此处<br>或点击下方按钮添加
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn" id="btnAdd" onclick="bridge.requestAddFiles()">添加图片</button>
+                <button class="btn" id="btnSelectAll" onclick="selectAllFiles()">全选</button>
+                <button class="btn" id="btnClear" onclick="bridge.requestClearFiles()">清空</button>
+            </div>
+
+            <div class="style-section">
+                <span class="panel-title" id="styleTitle">水印样式</span>
+                <select class="style-select" id="styleSelect" onchange="onStyleChange()">
+                </select>
+            </div>
+
+            <div class="progress-section" id="progressSection">
+                <div class="progress-label" id="progressLabel">处理中...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <button class="btn btn-danger btn-large" id="btnCancel" onclick="bridge.cancelProcessing()">取消</button>
+            </div>
+
+            <div class="process-section" id="processSection">
+                <button class="btn btn-primary btn-large" id="btnProcess" onclick="startProcessing()">开始处理</button>
+            </div>
+        </div>
+
+        <!-- 预览区域 -->
+        <div class="preview-container">
+            <div class="preview-panel">
+                <span class="panel-title" id="originalTitle">原图</span>
+                <div class="preview-area" id="originalPreview">
+                    <span class="preview-placeholder" id="originalPlaceholder">选择图片以预览</span>
+                    <img id="originalImage" style="display: none;">
+                </div>
+            </div>
+            <div class="preview-panel">
+                <span class="panel-title" id="resultTitle">效果预览</span>
+                <div class="preview-area" id="resultPreview">
+                    <span class="preview-placeholder" id="resultPlaceholder">选择图片以预览</span>
+                    <img id="resultImage" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" onclick="checkSelectedItems()">勾选选中项</div>
+        <div class="context-menu-item" onclick="uncheckSelectedItems()">取消勾选选中项</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="selectAllItems()">全选</div>
+        <div class="context-menu-item" onclick="deselectAllItems()">取消全选</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="menuOpenFile" onclick="openCurrentFile()">打开文件</div>
+        <div class="context-menu-item" id="menuOpenFolder" onclick="openCurrentFolder()">打开所在文件夹</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="removeSelectedItems()">移除选中项</div>
+        <div class="context-menu-item" onclick="bridge.requestClearFiles()">清空所有</div>
+    </div>
+
+    <!-- 拖放覆盖层 -->
+    <div class="drop-overlay" id="dropOverlay">
+        <div class="drop-overlay-text">释放以添加图片</div>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="status-bar" id="statusBar">就绪</div>
+
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        let bridge = null;
+        let fileList = [];
+        let selectedPaths = new Set();
+        let currentContextPath = null;
+        let isProcessing = false;
+
+        // 初始化 WebChannel
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            bridge = channel.objects.bridge;
+            
+            // 连接信号
+            bridge.filesAdded.connect(function(jsonData) {
+                fileList = JSON.parse(jsonData);
+                renderFileList();
+            });
+
+            bridge.previewUpdated.connect(function(original, result) {
+                updatePreview(original, result);
+            });
+
+            bridge.progressUpdated.connect(function(current, total, filename) {
+                updateProgress(current, total, filename);
+            });
+
+            bridge.processingFinished.connect(function(resultJson) {
+                onProcessingFinished(JSON.parse(resultJson));
+            });
+
+            bridge.statusMessage.connect(function(message) {
+                document.getElementById('statusBar').textContent = message;
+            });
+
+            bridge.uiTextsUpdated.connect(function(textsJson) {
+                updateUITexts(JSON.parse(textsJson));
+            });
+
+            // 初始化
+            initializeUI();
+        });
+
+        function initializeUI() {
+            // 获取翻译
+            const texts = JSON.parse(bridge.getTranslations());
+            updateUITexts(texts);
+
+            // 获取样式
+            const stylesData = JSON.parse(bridge.getStyles());
+            const styleSelect = document.getElementById('styleSelect');
+            styleSelect.innerHTML = '';
+            stylesData.styles.forEach(style => {
+                const option = document.createElement('option');
+                option.value = style;
+                option.textContent = style;
+                if (style === stylesData.current) {
+                    option.selected = true;
+                }
+                styleSelect.appendChild(option);
+            });
+
+            // 获取文件列表
+            fileList = JSON.parse(bridge.getFileList());
+            renderFileList();
+        }
+
+        function updateUITexts(texts) {
+            document.getElementById('panelTitle').textContent = texts.panel_image_list || '图片列表';
+            document.getElementById('searchBox').placeholder = texts.search_placeholder || '搜索图片...';
+            document.getElementById('btnAdd').textContent = texts.btn_add_images || '添加图片';
+            document.getElementById('btnSelectAll').textContent = texts.btn_select_all || '全选';
+            document.getElementById('btnClear').textContent = texts.btn_clear_list || '清空';
+            document.getElementById('styleTitle').textContent = texts.panel_watermark_style || '水印样式';
+            document.getElementById('btnProcess').textContent = texts.btn_process || '开始处理';
+            document.getElementById('btnCancel').textContent = texts.btn_cancel || '取消';
+            document.getElementById('originalTitle').textContent = texts.preview_original || '原图';
+            document.getElementById('resultTitle').textContent = texts.preview_result || '效果预览';
+            document.getElementById('originalPlaceholder').textContent = texts.preview_no_image || '选择图片以预览';
+            document.getElementById('resultPlaceholder').textContent = texts.preview_no_image || '选择图片以预览';
+            document.getElementById('emptyHint').innerHTML = (texts.drop_hint || '将图片或文件夹拖放到此处<br>或点击下方按钮添加').replace('\\n', '<br>');
+            document.getElementById('statusBar').textContent = texts.msg_ready || '就绪';
+        }
+
+        function renderFileList() {
+            const container = document.getElementById('fileList');
+            const emptyHint = document.getElementById('emptyHint');
+            const searchBox = document.getElementById('searchBox');
+            const searchText = searchBox.value.toLowerCase();
+
+            // 清空现有内容
+            container.innerHTML = '';
+
+            if (fileList.length === 0) {
+                container.appendChild(emptyHint);
+                emptyHint.style.display = 'flex';
+                updateListInfo();
+                return;
             }
-        """)
-        self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(self.preview_label)
 
-        self._original_pixmap: QPixmap | None = None
-        self._show_placeholder()
+            emptyHint.style.display = 'none';
 
-    def set_image(self, image: Image.Image):
-        """设置预览图片"""
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+            fileList.forEach(file => {
+                if (searchText && !file.name.toLowerCase().includes(searchText)) {
+                    return;
+                }
 
-        qimage = QImage(
-            image.tobytes(),
-            image.width,
-            image.height,
-            image.width * 3,
-            QImage.Format.Format_RGB888
-        )
-        self._original_pixmap = QPixmap.fromImage(qimage)
-        self._update_scaled_pixmap()
+                const item = document.createElement('div');
+                item.className = 'file-item' + (selectedPaths.has(file.path) ? ' selected' : '');
+                item.dataset.path = file.path;
 
-    def clear_image(self):
-        """清除预览"""
-        self._original_pixmap = None
-        self._show_placeholder()
+                item.innerHTML = `
+                    <div class="checkmark ${file.checked ? 'checked' : ''}" onclick="toggleCheck(event, '${escapeHtml(file.path)}')"></div>
+                    <div class="thumbnail">
+                        ${file.thumbnail ? `<img src="${file.thumbnail}">` : '<span class="thumbnail-placeholder">...</span>'}
+                    </div>
+                    <span class="file-name">${escapeHtml(file.name)}</span>
+                `;
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self._original_pixmap:
-            self._update_scaled_pixmap()
+                item.addEventListener('click', (e) => onItemClick(e, file.path));
+                item.addEventListener('dblclick', (e) => onItemDoubleClick(e, file.path));
+                item.addEventListener('contextmenu', (e) => onItemContextMenu(e, file.path));
 
-    def _update_scaled_pixmap(self):
-        """更新缩放后的图片"""
-        if self._original_pixmap:
-            available_size = self.preview_label.size()
-            target_size = QSize(available_size.width() - 16, available_size.height() - 16)
-            scaled = self._original_pixmap.scaled(
-                target_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.preview_label.setPixmap(scaled)
+                container.appendChild(item);
+            });
 
-    def _show_placeholder(self):
-        """显示占位符"""
-        self.preview_label.setText(t("preview_no_image"))
-        self.preview_label.setPixmap(QPixmap())
+            updateListInfo();
+        }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
 
-# ==================== 语言选择对话框 ====================
+        function toggleCheck(event, path) {
+            event.stopPropagation();
+            const file = fileList.find(f => f.path === path);
+            if (file) {
+                file.checked = !file.checked;
+                bridge.setFileChecked(JSON.stringify({path: path, checked: file.checked}));
+                renderFileList();
+            }
+        }
 
-class LanguageSelectDialog(QDialog):
-    """首次运行语言选择对话框"""
+        function onItemClick(event, path) {
+            if (event.ctrlKey || event.metaKey) {
+                if (selectedPaths.has(path)) {
+                    selectedPaths.delete(path);
+                } else {
+                    selectedPaths.add(path);
+                }
+            } else if (event.shiftKey && selectedPaths.size > 0) {
+                // Shift 多选
+                const paths = fileList.map(f => f.path);
+                const lastSelected = Array.from(selectedPaths).pop();
+                const startIdx = paths.indexOf(lastSelected);
+                const endIdx = paths.indexOf(path);
+                const [minIdx, maxIdx] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    selectedPaths.add(paths[i]);
+                }
+            } else {
+                selectedPaths.clear();
+                selectedPaths.add(path);
+                bridge.selectFile(path);
+            }
+            renderFileList();
+        }
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(t("language_select_title"))
-        self.setFixedSize(380, 260)
-        self.setStyleSheet(LIGHTROOM_STYLE)
-        self.selected_language = "zh-CN"
+        function onItemDoubleClick(event, path) {
+            const file = fileList.find(f => f.path === path);
+            if (file) {
+                file.checked = !file.checked;
+                bridge.setFileChecked(JSON.stringify({path: path, checked: file.checked}));
+                renderFileList();
+            }
+        }
 
-        self._init_ui()
+        function onItemContextMenu(event, path) {
+            event.preventDefault();
+            currentContextPath = path;
+            
+            if (!selectedPaths.has(path)) {
+                selectedPaths.clear();
+                selectedPaths.add(path);
+                renderFileList();
+            }
 
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(16)
+            const menu = document.getElementById('contextMenu');
+            menu.style.left = event.clientX + 'px';
+            menu.style.top = event.clientY + 'px';
+            menu.classList.add('visible');
+        }
 
-        title = QLabel("Select Language / 选择语言")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(title)
+        function selectAllFiles() {
+            bridge.checkAll();
+        }
 
-        desc = QLabel(t("language_select_desc"))
-        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-        layout.addWidget(desc)
+        function selectAllItems() {
+            fileList.forEach(f => selectedPaths.add(f.path));
+            renderFileList();
+            hideContextMenu();
+        }
 
-        layout.addSpacing(8)
+        function deselectAllItems() {
+            selectedPaths.clear();
+            renderFileList();
+            hideContextMenu();
+        }
 
-        self.language_combo = QComboBox()
-        self.language_combo.setMinimumHeight(38)
-        for code, name in LANGUAGE_NAMES.items():
-            self.language_combo.addItem(name, code)
-        layout.addWidget(self.language_combo)
+        function checkSelectedItems() {
+            bridge.checkSelected(JSON.stringify(Array.from(selectedPaths)));
+            hideContextMenu();
+        }
 
-        layout.addStretch()
+        function uncheckSelectedItems() {
+            bridge.uncheckSelected(JSON.stringify(Array.from(selectedPaths)));
+            hideContextMenu();
+        }
 
-        confirm_btn = QPushButton(t("language_confirm"))
-        confirm_btn.setObjectName("PrimaryButton")
-        confirm_btn.setMinimumHeight(38)
-        confirm_btn.clicked.connect(self._confirm)
-        layout.addWidget(confirm_btn)
+        function removeSelectedItems() {
+            bridge.removeSelected(JSON.stringify(Array.from(selectedPaths)));
+            selectedPaths.clear();
+            hideContextMenu();
+        }
 
-    def _confirm(self):
-        self.selected_language = self.language_combo.currentData()
-        self.accept()
+        function openCurrentFile() {
+            if (currentContextPath) {
+                bridge.openFile(currentContextPath);
+            }
+            hideContextMenu();
+        }
 
-    def get_selected_language(self) -> str:
-        return self.selected_language
+        function openCurrentFolder() {
+            if (currentContextPath) {
+                bridge.openFolder(currentContextPath);
+            }
+            hideContextMenu();
+        }
+
+        function hideContextMenu() {
+            document.getElementById('contextMenu').classList.remove('visible');
+        }
+
+        function onStyleChange() {
+            const style = document.getElementById('styleSelect').value;
+            bridge.setStyle(style);
+            // 如果有选中的文件，更新预览
+            if (selectedPaths.size === 1) {
+                bridge.selectFile(Array.from(selectedPaths)[0]);
+            }
+        }
+
+        function startProcessing() {
+            const style = document.getElementById('styleSelect').value;
+            bridge.startProcessing(style);
+        }
+
+        function setProcessingState(processing) {
+            isProcessing = processing;
+            document.getElementById('processSection').style.display = processing ? 'none' : 'block';
+            document.getElementById('progressSection').classList.toggle('visible', processing);
+            document.getElementById('btnAdd').disabled = processing;
+            document.getElementById('btnClear').disabled = processing;
+            document.getElementById('btnSelectAll').disabled = processing;
+            document.getElementById('styleSelect').disabled = processing;
+        }
+
+        function updateProgress(current, total, filename) {
+            setProcessingState(true);
+            const percent = (current / total) * 100;
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressLabel').textContent = `处理中 ${current}/${total}: ${filename}`;
+        }
+
+        function onProcessingFinished(result) {
+            setProcessingState(false);
+            document.getElementById('progressFill').style.width = '0%';
+        }
+
+        function updatePreview(originalBase64, resultBase64) {
+            const originalImg = document.getElementById('originalImage');
+            const originalPlaceholder = document.getElementById('originalPlaceholder');
+            const resultImg = document.getElementById('resultImage');
+            const resultPlaceholder = document.getElementById('resultPlaceholder');
+
+            if (originalBase64) {
+                originalImg.src = originalBase64;
+                originalImg.style.display = 'block';
+                originalPlaceholder.style.display = 'none';
+            } else {
+                originalImg.style.display = 'none';
+                originalPlaceholder.style.display = 'block';
+            }
+
+            if (resultBase64) {
+                resultImg.src = resultBase64;
+                resultImg.style.display = 'block';
+                resultPlaceholder.style.display = 'none';
+            } else {
+                resultImg.style.display = 'none';
+                resultPlaceholder.style.display = 'block';
+            }
+        }
+
+        function updateListInfo() {
+            const total = fileList.length;
+            const checked = fileList.filter(f => f.checked).length;
+            const info = document.getElementById('listInfo');
+            const btn = document.getElementById('btnProcess');
+            
+            if (checked > 0) {
+                info.textContent = `已选择 ${checked} / ${total} 张`;
+                btn.textContent = '处理选中';
+            } else {
+                info.textContent = `共 ${total} 张图片`;
+                btn.textContent = '开始处理';
+            }
+        }
+
+        // 搜索过滤
+        document.getElementById('searchBox').addEventListener('input', function() {
+            renderFileList();
+        });
+
+        // 点击空白处关闭右键菜单
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.context-menu')) {
+                hideContextMenu();
+            }
+        });
+
+        // 拖放处理
+        document.addEventListener('dragenter', function(e) {
+            e.preventDefault();
+            document.getElementById('dropOverlay').classList.add('visible');
+        });
+
+        document.addEventListener('dragleave', function(e) {
+            if (e.target === document.getElementById('dropOverlay')) {
+                document.getElementById('dropOverlay').classList.remove('visible');
+            }
+        });
+
+        document.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener('drop', function(e) {
+            e.preventDefault();
+            document.getElementById('dropOverlay').classList.remove('visible');
+            // 拖放处理由 Python 端处理
+        });
+
+        // 键盘快捷键
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                selectAllItems();
+            } else if (e.key === 'Delete') {
+                if (selectedPaths.size > 0) {
+                    removeSelectedItems();
+                }
+            } else if (e.key === 'Escape') {
+                hideContextMenu();
+                deselectAllItems();
+            }
+        });
+    </script>
+</body>
+</html>'''
 
 
 # ==================== 设置对话框 ====================
 
 class SettingsDialog(QDialog):
-    """设置对话框"""
+    """设置对话框 - 保持原有实现"""
 
     def __init__(self, config_manager: ConfigManager, parent=None):
         super().__init__(parent)
@@ -1158,12 +1313,13 @@ class SettingsDialog(QDialog):
 
         self.setWindowTitle(t("settings_title"))
         self.setMinimumSize(480, 520)
-        self.setStyleSheet(LIGHTROOM_STYLE)
 
-        self._init_ui()
-        self._load_settings()
+        from PyQt6.QtWidgets import (
+            QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
+            QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
+            QLineEdit, QSpinBox, QLabel, QPushButton, QComboBox
+        )
 
-    def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
@@ -1173,87 +1329,47 @@ class SettingsDialog(QDialog):
         layout.addWidget(tab_widget, stretch=1)
 
         # 常规标签页
-        general_tab = self._create_general_tab()
-        tab_widget.addTab(general_tab, t("settings_tab_general"))
+        general_tab = QWidget()
+        general_layout = QVBoxLayout(general_tab)
+        general_layout.setContentsMargins(12, 12, 12, 12)
 
-        # 输出标签页
-        output_tab = self._create_output_tab()
-        tab_widget.addTab(output_tab, t("settings_tab_output"))
-
-        # 高级标签页
-        advanced_tab = self._create_advanced_tab()
-        tab_widget.addTab(advanced_tab, t("settings_tab_advanced"))
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-
-        self.reset_btn = QPushButton(t("settings_reset"))
-        self.reset_btn.clicked.connect(self._reset_settings)
-        btn_layout.addWidget(self.reset_btn)
-
-        btn_layout.addStretch()
-
-        self.cancel_btn = QPushButton(t("settings_cancel"))
-        self.cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(self.cancel_btn)
-
-        self.save_btn = QPushButton(t("settings_save"))
-        self.save_btn.setObjectName("PrimaryButton")
-        self.save_btn.setMinimumWidth(90)
-        self.save_btn.clicked.connect(self._save_and_close)
-        btn_layout.addWidget(self.save_btn)
-
-        layout.addLayout(btn_layout)
-
-    def _create_general_tab(self) -> QWidget:
-        """创建常规设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(16)
-
-        # 语言设置
         lang_group = QGroupBox(t("settings_language"))
         lang_layout = QVBoxLayout(lang_group)
-
         self.language_combo = QComboBox()
         for code, name in LANGUAGE_NAMES.items():
             self.language_combo.addItem(name, code)
+        current_lang = self.config.get('general', {}).get('language', 'zh-CN')
+        for i in range(self.language_combo.count()):
+            if self.language_combo.itemData(i) == current_lang:
+                self.language_combo.setCurrentIndex(i)
+                break
         lang_layout.addWidget(self.language_combo)
+        general_layout.addWidget(lang_group)
 
-        layout.addWidget(lang_group)
-
-        # 会话设置
         session_group = QGroupBox(t("settings_tab_general"))
         session_layout = QVBoxLayout(session_group)
-
         self.restore_session_check = QCheckBox(t("settings_restore_session"))
+        self.restore_session_check.setChecked(
+            self.config.get('general', {}).get('restore_last_session', False)
+        )
         session_layout.addWidget(self.restore_session_check)
+        general_layout.addWidget(session_group)
+        general_layout.addStretch()
+        tab_widget.addTab(general_tab, t("settings_tab_general"))
 
-        layout.addWidget(session_group)
+        # 输出标签页
+        output_tab = QWidget()
+        output_layout = QVBoxLayout(output_tab)
+        output_layout.setContentsMargins(12, 12, 12, 12)
 
-        layout.addStretch()
-        return widget
-
-    def _create_output_tab(self) -> QWidget:
-        """创建输出设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(16)
-
-        # 输出目录
         dir_group = QGroupBox(t("settings_output"))
         dir_layout = QVBoxLayout(dir_group)
 
         self.same_dir_radio = QRadioButton(t("settings_same_dir"))
         self.custom_dir_radio = QRadioButton(t("settings_custom_dir"))
-
         dir_btn_group = QButtonGroup(self)
         dir_btn_group.addButton(self.same_dir_radio)
         dir_btn_group.addButton(self.custom_dir_radio)
-
         dir_layout.addWidget(self.same_dir_radio)
         dir_layout.addWidget(self.custom_dir_radio)
 
@@ -1271,62 +1387,53 @@ class SettingsDialog(QDialog):
         dir_layout.addLayout(path_layout)
 
         self.same_dir_radio.toggled.connect(self._on_dir_option_changed)
-        self.custom_dir_radio.toggled.connect(self._on_dir_option_changed)
+        output_layout.addWidget(dir_group)
 
-        layout.addWidget(dir_group)
+        output_config = self.config.get('output', {})
+        if output_config.get('same_directory', True):
+            self.same_dir_radio.setChecked(True)
+        else:
+            self.custom_dir_radio.setChecked(True)
+        self.output_dir_edit.setText(output_config.get('custom_directory', ''))
 
-        # 文件名设置
         filename_group = QGroupBox(t("settings_filename_pattern"))
         filename_layout = QVBoxLayout(filename_group)
-
         self.filename_pattern_edit = QLineEdit()
-        self.filename_pattern_edit.setText("{original}_stamped")
-        self.filename_pattern_edit.setToolTip(t("settings_filename_tooltip"))
+        self.filename_pattern_edit.setText(output_config.get('filename_pattern', '{original}_stamped'))
         filename_layout.addWidget(self.filename_pattern_edit)
-
         hint_label = QLabel(t("settings_filename_tooltip"))
-        hint_label.setStyleSheet("color: #808080; font-size: 10px;")
         hint_label.setWordWrap(True)
         filename_layout.addWidget(hint_label)
+        output_layout.addWidget(filename_group)
 
-        layout.addWidget(filename_group)
-
-        # JPEG质量
         quality_group = QGroupBox(t("settings_jpeg_quality"))
         quality_layout = QHBoxLayout(quality_group)
-
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 100)
-        self.quality_spin.setValue(95)
+        self.quality_spin.setValue(output_config.get('jpeg_quality', 95))
         self.quality_spin.setSuffix(" %")
-        self.quality_spin.setFixedWidth(100)
         quality_layout.addWidget(self.quality_spin)
         quality_layout.addStretch()
+        output_layout.addWidget(quality_group)
 
-        layout.addWidget(quality_group)
-
-        # 其他选项
         self.preserve_exif_check = QCheckBox(t("settings_preserve_exif"))
-        self.preserve_exif_check.setChecked(True)
-        layout.addWidget(self.preserve_exif_check)
+        self.preserve_exif_check.setChecked(output_config.get('preserve_exif', True))
+        output_layout.addWidget(self.preserve_exif_check)
 
         self.overwrite_check = QCheckBox(t("settings_overwrite"))
-        layout.addWidget(self.overwrite_check)
+        self.overwrite_check.setChecked(output_config.get('overwrite_existing', False))
+        output_layout.addWidget(self.overwrite_check)
 
-        layout.addStretch()
-        return widget
+        output_layout.addStretch()
+        tab_widget.addTab(output_tab, t("settings_tab_output"))
 
-    def _create_advanced_tab(self) -> QWidget:
-        """创建高级设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(16)
+        # 高级标签页
+        advanced_tab = QWidget()
+        advanced_layout = QVBoxLayout(advanced_tab)
+        advanced_layout.setContentsMargins(12, 12, 12, 12)
 
-        # 时间源设置
         time_group = QGroupBox(t("settings_time_source"))
         time_layout = QVBoxLayout(time_group)
-
         time_layout.addWidget(QLabel(t("settings_primary_source")))
 
         self.time_exif_radio = QRadioButton(t("settings_exif"))
@@ -1342,32 +1449,6 @@ class SettingsDialog(QDialog):
         time_layout.addWidget(self.time_modified_radio)
         time_layout.addWidget(self.time_created_radio)
 
-        time_layout.addSpacing(8)
-
-        self.fallback_check = QCheckBox(t("settings_fallback"))
-        self.fallback_check.setChecked(True)
-        time_layout.addWidget(self.fallback_check)
-
-        layout.addWidget(time_group)
-
-        layout.addStretch()
-        return widget
-
-    def _load_settings(self):
-        """加载设置"""
-        # 语言
-        current_lang = self.config.get('general', {}).get('language', 'zh-CN')
-        for i in range(self.language_combo.count()):
-            if self.language_combo.itemData(i) == current_lang:
-                self.language_combo.setCurrentIndex(i)
-                break
-
-        # 会话恢复
-        self.restore_session_check.setChecked(
-            self.config.get('general', {}).get('restore_last_session', False)
-        )
-
-        # 时间源
         primary = self.config.get('time_source', {}).get('primary', 'exif')
         if primary == 'exif':
             self.time_exif_radio.setChecked(True)
@@ -1376,32 +1457,57 @@ class SettingsDialog(QDialog):
         else:
             self.time_created_radio.setChecked(True)
 
+        time_layout.addSpacing(8)
+        self.fallback_check = QCheckBox(t("settings_fallback"))
         self.fallback_check.setChecked(
             self.config.get('time_source', {}).get('fallback_enabled', True)
         )
+        time_layout.addWidget(self.fallback_check)
+        advanced_layout.addWidget(time_group)
+        advanced_layout.addStretch()
+        tab_widget.addTab(advanced_tab, t("settings_tab_advanced"))
 
-        # 输出设置
-        output = self.config.get('output', {})
-        if output.get('same_directory', True):
-            self.same_dir_radio.setChecked(True)
-        else:
-            self.custom_dir_radio.setChecked(True)
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
 
-        self.output_dir_edit.setText(output.get('custom_directory', ''))
-        self.filename_pattern_edit.setText(output.get('filename_pattern', '{original}_stamped'))
-        self.quality_spin.setValue(output.get('jpeg_quality', 95))
-        self.preserve_exif_check.setChecked(output.get('preserve_exif', True))
-        self.overwrite_check.setChecked(output.get('overwrite_existing', False))
+        reset_btn = QPushButton(t("settings_reset"))
+        reset_btn.clicked.connect(self._reset_settings)
+        btn_layout.addWidget(reset_btn)
+
+        btn_layout.addStretch()
+
+        cancel_btn = QPushButton(t("settings_cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton(t("settings_save"))
+        save_btn.setMinimumWidth(90)
+        save_btn.clicked.connect(self._save_and_close)
+        btn_layout.addWidget(save_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _on_dir_option_changed(self):
+        enabled = self.custom_dir_radio.isChecked()
+        self.output_dir_edit.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
+
+    def _browse_output_dir(self):
+        dir_path = QFileDialog.getExistingDirectory(self, t("settings_browse"))
+        if dir_path:
+            self.output_dir_edit.setText(dir_path)
+
+    def _reset_settings(self):
+        self.config = self.config_manager.get_default()
+        # 重新加载 UI
 
     def _save_and_close(self):
-        """保存并关闭"""
-        # 语言
         new_lang = self.language_combo.currentData()
         self.config['general']['language'] = new_lang
         self.config['general']['restore_last_session'] = self.restore_session_check.isChecked()
         I18n.set_language(new_lang)
 
-        # 时间源
         if self.time_exif_radio.isChecked():
             primary = 'exif'
         elif self.time_modified_radio.isChecked():
@@ -1415,7 +1521,6 @@ class SettingsDialog(QDialog):
             'fallback_to': 'file_modified'
         }
 
-        # 输出设置
         self.config['output'] = {
             'same_directory': self.same_dir_radio.isChecked(),
             'custom_directory': self.output_dir_edit.text(),
@@ -1427,22 +1532,6 @@ class SettingsDialog(QDialog):
 
         self.config_manager.save(self.config)
         self.accept()
-
-    def _reset_settings(self):
-        """恢复默认"""
-        self.config = self.config_manager.get_default()
-        self._load_settings()
-
-    def _on_dir_option_changed(self):
-        """目录选项变化"""
-        enabled = self.custom_dir_radio.isChecked()
-        self.output_dir_edit.setEnabled(enabled)
-        self.browse_btn.setEnabled(enabled)
-
-    def _browse_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, t("settings_browse"))
-        if dir_path:
-            self.output_dir_edit.setText(dir_path)
 
     def get_config(self) -> dict:
         return self.config
@@ -1457,119 +1546,79 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("about_title"))
         self.setFixedSize(420, 480)
-        self.setStyleSheet(LIGHTROOM_STYLE)
 
-        self._init_ui()
+        from PyQt6.QtWidgets import QVBoxLayout, QLabel, QPushButton
+        from PyQt6.QtGui import QPixmap
+        from PyQt6.QtCore import QSize
 
-    def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(0)
 
-        # Logo
         logo_label = QLabel()
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_label.setFixedHeight(100)
         logo_path = get_base_path() / "assets" / "logo.png"
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
-            scaled_pixmap = pixmap.scaled(
+            scaled = pixmap.scaled(
                 QSize(80, 80),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
-            logo_label.setPixmap(scaled_pixmap)
+            logo_label.setPixmap(scaled)
         else:
             logo_label.setText("📷")
-            logo_label.setStyleSheet("font-size: 48px;")
         layout.addWidget(logo_label)
 
         layout.addSpacing(16)
 
-        # 软件名称
         name_label = QLabel("Photo Timestamper")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(name_label)
 
         layout.addSpacing(4)
 
-        # 版本
         version_label = QLabel(t("about_version", version=__version__))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
         layout.addWidget(version_label)
 
         layout.addSpacing(12)
 
-        # 描述
         desc_label = QLabel(t("about_description"))
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc_label.setStyleSheet("color: #808080; font-size: 11px;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
         layout.addSpacing(20)
 
-        # 分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #3d3d3d;")
-        separator.setFixedHeight(1)
-        layout.addWidget(separator)
-
-        layout.addSpacing(20)
-
-        # 作者
         author_title = QLabel(t("about_author"))
         author_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_title.setStyleSheet("color: #808080; font-size: 10px;")
         layout.addWidget(author_title)
 
         author_name = QLabel(__author__)
         author_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_name.setStyleSheet("color: #c0c0c0; font-size: 13px;")
         layout.addWidget(author_name)
 
         layout.addSpacing(12)
 
-        # 协作者
         collab_title = QLabel(t("about_collaborators"))
         collab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        collab_title.setStyleSheet("color: #808080; font-size: 10px;")
         layout.addWidget(collab_title)
 
         collab_names = QLabel(" · ".join(__collaborators__))
         collab_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        collab_names.setStyleSheet("color: #a0a0a0; font-size: 12px;")
         layout.addWidget(collab_names)
-
-        layout.addSpacing(12)
-
-        # 许可证
-        license_title = QLabel(t("about_license"))
-        license_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        license_title.setStyleSheet("color: #808080; font-size: 10px;")
-        layout.addWidget(license_title)
-
-        license_type = QLabel(t("about_license_type"))
-        license_type.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        license_type.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-        layout.addWidget(license_type)
 
         layout.addStretch()
 
-        # GitHub 按钮
         github_btn = QPushButton(t("about_github"))
-        github_btn.setObjectName("PrimaryButton")
-        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         github_btn.setFixedHeight(36)
         github_btn.clicked.connect(self._open_github)
         layout.addWidget(github_btn)
 
         layout.addSpacing(8)
 
-        # 关闭按钮
         close_btn = QPushButton(t("about_close"))
         close_btn.setFixedHeight(36)
         close_btn.clicked.connect(self.close)
@@ -1589,20 +1638,17 @@ class ImportDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("import_title"))
         self.setFixedSize(380, 220)
-        self.setStyleSheet(LIGHTROOM_STYLE)
+
+        from PyQt6.QtWidgets import QVBoxLayout, QLabel, QCheckBox, QPushButton, QHBoxLayout
 
         self.selected_files: list[str] = []
         self.recursive = True
 
-        self._init_ui()
-
-    def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
         info_label = QLabel(t("import_desc"))
-        info_label.setStyleSheet("font-size: 13px; color: #e0e0e0;")
         layout.addWidget(info_label)
 
         self.recursive_check = QCheckBox(t("import_recursive"))
@@ -1614,16 +1660,15 @@ class ImportDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        self.file_btn = QPushButton(t("import_select_files"))
-        self.file_btn.setMinimumHeight(36)
-        self.file_btn.clicked.connect(self._select_files)
-        btn_layout.addWidget(self.file_btn)
+        file_btn = QPushButton(t("import_select_files"))
+        file_btn.setMinimumHeight(36)
+        file_btn.clicked.connect(self._select_files)
+        btn_layout.addWidget(file_btn)
 
-        self.folder_btn = QPushButton(t("import_select_folder"))
-        self.folder_btn.setObjectName("PrimaryButton")
-        self.folder_btn.setMinimumHeight(36)
-        self.folder_btn.clicked.connect(self._select_folder)
-        btn_layout.addWidget(self.folder_btn)
+        folder_btn = QPushButton(t("import_select_folder"))
+        folder_btn.setMinimumHeight(36)
+        folder_btn.clicked.connect(self._select_folder)
+        btn_layout.addWidget(folder_btn)
 
         layout.addLayout(btn_layout)
 
@@ -1656,10 +1701,58 @@ class ImportDialog(QDialog):
         return self.selected_files
 
 
+# ==================== 语言选择对话框 ====================
+
+class LanguageSelectDialog(QDialog):
+    """首次运行语言选择对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("language_select_title"))
+        self.setFixedSize(380, 260)
+        self.selected_language = "zh-CN"
+
+        from PyQt6.QtWidgets import QVBoxLayout, QLabel, QComboBox, QPushButton
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 28, 28, 28)
+        layout.setSpacing(16)
+
+        title = QLabel("Select Language / 选择语言")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        desc = QLabel(t("language_select_desc"))
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(desc)
+
+        layout.addSpacing(8)
+
+        self.language_combo = QComboBox()
+        self.language_combo.setMinimumHeight(38)
+        for code, name in LANGUAGE_NAMES.items():
+            self.language_combo.addItem(name, code)
+        layout.addWidget(self.language_combo)
+
+        layout.addStretch()
+
+        confirm_btn = QPushButton(t("language_confirm"))
+        confirm_btn.setMinimumHeight(38)
+        confirm_btn.clicked.connect(self._confirm)
+        layout.addWidget(confirm_btn)
+
+    def _confirm(self):
+        self.selected_language = self.language_combo.currentData()
+        self.accept()
+
+    def get_selected_language(self) -> str:
+        return self.selected_language
+
+
 # ==================== 主窗口 ====================
 
 class MainWindow(QMainWindow):
-    """主窗口"""
+    """主窗口 - QtWebEngine 版本"""
 
     def __init__(self):
         super().__init__()
@@ -1674,7 +1767,6 @@ class MainWindow(QMainWindow):
             I18n.set_language(saved_lang)
 
         self.processing_thread: ProcessingThread | None = None
-        self._menu_created = False
 
         self._init_ui()
         self._setup_menu()
@@ -1685,9 +1777,8 @@ class MainWindow(QMainWindow):
         if self.config_manager.is_first_run():
             QTimer.singleShot(100, self._show_language_selection)
         else:
-            # 恢复上次会话
             if self.config.get('general', {}).get('restore_last_session', False):
-                QTimer.singleShot(200, self._restore_last_session)
+                QTimer.singleShot(500, self._restore_last_session)
 
     def _init_ui(self):
         self.setWindowTitle(t("app_name"))
@@ -1702,45 +1793,28 @@ class MainWindow(QMainWindow):
             if icon_path.exists():
                 self.setWindowIcon(QIcon(str(icon_path)))
 
-        # 应用样式
-        self.setStyleSheet(LIGHTROOM_STYLE)
+        # 创建 WebEngine 视图
+        self.web_view = QWebEngineView()
 
-        # 中央部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # 创建 WebChannel 和 Bridge
+        self.bridge = WebBridge(self)
+        self.channel = QWebChannel()
+        self.channel.registerObject('bridge', self.bridge)
+        self.web_view.page().setWebChannel(self.channel)
 
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # 加载 HTML
+        self.web_view.setHtml(get_html_content())
 
-        # 创建三栏布局
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
-
-        # 左栏 - 控制面板
-        left_panel = self._create_left_panel()
-        splitter.addWidget(left_panel)
-
-        # 中栏 - 原图预览
-        self.original_preview = self._create_preview_panel(t("preview_original"))
-        splitter.addWidget(self.original_preview)
-
-        # 右栏 - 效果预览
-        self.result_preview = self._create_preview_panel(t("preview_result"))
-        splitter.addWidget(self.result_preview)
-
-        # 设置分割比例
-        splitter.setSizes([280, 460, 460])
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 1)
+        # 设置为中央部件
+        self.setCentralWidget(self.web_view)
 
         # 状态栏
         self.statusBar().showMessage(t("msg_ready"))
 
     def _setup_menu(self):
         """设置菜单栏"""
-        # 清除现有菜单
+        from PyQt6.QtGui import QAction
+
         menubar = self.menuBar()
         menubar.clear()
 
@@ -1774,24 +1848,6 @@ class MainWindow(QMainWindow):
         # 编辑菜单
         edit_menu = menubar.addMenu(t("menu_edit"))
 
-        select_all_action = QAction(t("menu_select_all"), self)
-        select_all_action.setShortcut("Ctrl+A")
-        select_all_action.triggered.connect(self._select_all)
-        edit_menu.addAction(select_all_action)
-
-        deselect_action = QAction(t("menu_deselect_all"), self)
-        deselect_action.triggered.connect(self._deselect_all)
-        edit_menu.addAction(deselect_action)
-
-        edit_menu.addSeparator()
-
-        remove_action = QAction(t("menu_remove_selected"), self)
-        remove_action.setShortcut("Delete")
-        remove_action.triggered.connect(self._remove_selected)
-        edit_menu.addAction(remove_action)
-
-        edit_menu.addSeparator()
-
         settings_action = QAction(t("menu_settings"), self)
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self._show_settings)
@@ -1804,146 +1860,10 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
-        self._menu_created = True
-
     def _setup_shortcuts(self):
         """设置快捷键"""
-        # 处理 Ctrl+Enter
         process_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
         process_shortcut.activated.connect(self._start_processing)
-
-    def _create_left_panel(self) -> QWidget:
-        """创建左侧控制面板"""
-        panel = QWidget()
-        panel.setObjectName("LeftPanel")
-        panel.setFixedWidth(280)
-
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        # 图片列表标题和信息
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(8)
-
-        list_label = QLabel(t("panel_image_list"))
-        list_label.setObjectName("PanelTitle")
-        header_layout.addWidget(list_label)
-
-        header_layout.addStretch()
-
-        self.list_info_label = QLabel(t("image_count", count=0))
-        self.list_info_label.setStyleSheet("color: #606060; font-size: 10px;")
-        header_layout.addWidget(self.list_info_label)
-
-        layout.addLayout(header_layout)
-
-        # 图片列表
-        self.image_list = ImageListWidget()
-        self.image_list.files_dropped.connect(self._on_files_dropped)
-        self.image_list.selection_changed.connect(self._on_selection_changed)
-        self.image_list.check_changed.connect(self._update_list_info)
-        layout.addWidget(self.image_list, stretch=1)
-
-        # 列表操作按钮
-        list_btn_layout = QHBoxLayout()
-        list_btn_layout.setSpacing(6)
-
-        self.add_btn = QPushButton(t("btn_add_images"))
-        self.add_btn.setObjectName("SmallButton")
-        self.add_btn.setToolTip(t("tooltip_add_images"))
-        self.add_btn.clicked.connect(self._show_import_dialog)
-        list_btn_layout.addWidget(self.add_btn)
-
-        self.select_all_btn = QPushButton(t("btn_select_all"))
-        self.select_all_btn.setObjectName("SmallButton")
-        self.select_all_btn.clicked.connect(self.image_list.check_all)
-        list_btn_layout.addWidget(self.select_all_btn)
-
-        self.clear_btn = QPushButton(t("btn_clear_list"))
-        self.clear_btn.setObjectName("SmallButton")
-        self.clear_btn.clicked.connect(self._clear_files)
-        list_btn_layout.addWidget(self.clear_btn)
-
-        layout.addLayout(list_btn_layout)
-
-        layout.addSpacing(6)
-
-        # 水印样式
-        style_label = QLabel(t("panel_watermark_style"))
-        style_label.setObjectName("PanelTitle")
-        layout.addWidget(style_label)
-
-        self.style_combo = QComboBox()
-        self.style_combo.setMinimumHeight(34)
-        self.style_combo.setToolTip(t("tooltip_style"))
-        self._populate_styles()
-        self.style_combo.currentTextChanged.connect(self._on_style_changed)
-        layout.addWidget(self.style_combo)
-
-        layout.addSpacing(8)
-
-        # 处理进度
-        self.progress_widget = QWidget()
-        progress_layout = QVBoxLayout(self.progress_widget)
-        progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(8)
-
-        self.progress_label = QLabel(t("processing"))
-        self.progress_label.setStyleSheet("color: #a0a0a0; font-size: 11px;")
-        progress_layout.addWidget(self.progress_label)
-
-        self.progress_bar = QProgressBar()
-        progress_layout.addWidget(self.progress_bar)
-
-        self.cancel_btn = QPushButton(t("btn_cancel"))
-        self.cancel_btn.setObjectName("DangerButton")
-        self.cancel_btn.setMinimumHeight(34)
-        self.cancel_btn.clicked.connect(self._cancel_processing)
-        progress_layout.addWidget(self.cancel_btn)
-
-        self.progress_widget.setVisible(False)
-        layout.addWidget(self.progress_widget)
-
-        # 执行按钮
-        self.process_btn = QPushButton(t("btn_process"))
-        self.process_btn.setObjectName("PrimaryButton")
-        self.process_btn.setMinimumHeight(40)
-        self.process_btn.setToolTip(t("tooltip_process"))
-        self.process_btn.clicked.connect(self._start_processing)
-        layout.addWidget(self.process_btn)
-
-        return panel
-
-    def _create_preview_panel(self, title: str) -> QWidget:
-        """创建预览面板"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-
-        title_label = QLabel(title)
-        title_label.setObjectName("PanelTitle")
-        layout.addWidget(title_label)
-
-        panel.title_label = title_label
-
-        preview = PreviewWidget()
-        layout.addWidget(preview, stretch=1)
-
-        panel.preview_widget = preview
-
-        return panel
-
-    def _populate_styles(self):
-        """填充样式下拉列表"""
-        styles = self.style_manager.list_styles()
-        self.style_combo.clear()
-        self.style_combo.addItems(styles)
-
-        last_style = self.config.get('ui', {}).get('last_style', '佳能')
-        if last_style in styles:
-            self.style_combo.setCurrentText(last_style)
 
     def _show_language_selection(self):
         """显示语言选择对话框"""
@@ -1974,8 +1894,7 @@ class MainWindow(QMainWindow):
 
     def _add_files(self, files: list[str]):
         """添加文件"""
-        added, duplicates = self.image_list.add_files(files)
-        self._update_list_info()
+        added, duplicates = self.bridge.add_files(files)
 
         if duplicates > 0:
             self.statusBar().showMessage(
@@ -1983,6 +1902,10 @@ class MainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage(t('msg_added_images', count=added))
+
+    def _clear_files(self):
+        """清空文件"""
+        self.bridge.requestClearFiles()
 
     def _show_settings(self):
         """显示设置对话框"""
@@ -1997,27 +1920,6 @@ class MainWindow(QMainWindow):
         dialog = AboutDialog(self)
         dialog.exec()
 
-    def _on_files_dropped(self, files: list[str]):
-        """处理拖放的文件"""
-        self._add_files(files)
-
-    def _on_selection_changed(self, selected: list[str]):
-        """选择变化时更新预览"""
-        if selected:
-            self._update_preview(selected[0])
-        else:
-            self.original_preview.preview_widget.clear_image()
-            self.result_preview.preview_widget.clear_image()
-
-    def _on_style_changed(self, style_name: str):
-        """样式变化时更新预览"""
-        self.config['ui']['last_style'] = style_name
-        self.config_manager.save(self.config)
-
-        selected = self.image_list.get_selected_files()
-        if selected:
-            self._update_preview(selected[0])
-
     def _update_preview(self, filepath: str):
         """更新预览"""
         try:
@@ -2026,12 +1928,14 @@ class MainWindow(QMainWindow):
                 image = image.convert('RGB')
 
             # 原图预览
-            original_preview = image.copy()
-            original_preview.thumbnail((3600, 2700), Image.Resampling.LANCZOS)
-            self.original_preview.preview_widget.set_image(original_preview)
+            original_copy = image.copy()
+            original_copy.thumbnail((1800, 1350), Image.Resampling.LANCZOS)
+            original_buffer = BytesIO()
+            original_copy.save(original_buffer, format='JPEG', quality=85)
+            original_b64 = f"data:image/jpeg;base64,{base64.b64encode(original_buffer.getvalue()).decode('utf-8')}"
 
             # 效果预览
-            style_name = self.style_combo.currentText()
+            style_name = self.config.get('ui', {}).get('last_style', '佳能')
             style = self.style_manager.load_style(style_name)
 
             extractor = TimeExtractor(
@@ -2042,75 +1946,43 @@ class MainWindow(QMainWindow):
             timestamp = extractor.extract(filepath)
 
             renderer = WatermarkRenderer(style, self.style_manager.fonts_dir)
-            result_preview = renderer.render_preview(image, timestamp, (3600, 2700))
-            self.result_preview.preview_widget.set_image(result_preview)
+            result = renderer.render_preview(image, timestamp, (1800, 1350))
+
+            result_buffer = BytesIO()
+            result.save(result_buffer, format='JPEG', quality=85)
+            result_b64 = f"data:image/jpeg;base64,{base64.b64encode(result_buffer.getvalue()).decode('utf-8')}"
+
+            self.bridge.previewUpdated.emit(original_b64, result_b64)
 
         except Exception as e:
             logger.error(f"生成预览失败: {e}")
-            self.original_preview.preview_widget.clear_image()
-            self.result_preview.preview_widget.clear_image()
-
-    def _clear_files(self):
-        """清空文件列表"""
-        if self.image_list.get_count() > 0:
-            self.image_list.clear_files()
-            self.original_preview.preview_widget.clear_image()
-            self.result_preview.preview_widget.clear_image()
-            self._update_list_info()
-            self.statusBar().showMessage(t("msg_cleared"))
-
-    def _select_all(self):
-        """全选"""
-        self.image_list.list_widget.selectAll()
-
-    def _deselect_all(self):
-        """取消全选"""
-        self.image_list.list_widget.clearSelection()
-
-    def _remove_selected(self):
-        """移除选中图片"""
-        count = len(self.image_list.get_selected_files())
-        if count > 0:
-            self.image_list.remove_selected()
-            self._update_list_info()
-            self.statusBar().showMessage(t("msg_removed", count=count))
-
-    def _update_list_info(self):
-        """更新列表信息"""
-        total = self.image_list.get_count()
-        checked = self.image_list.get_checked_count()
-
-        if checked > 0:
-            self.list_info_label.setText(t("image_selected_count", selected=checked, total=total))
-            self.process_btn.setText(t("btn_process_selected"))
-        else:
-            self.list_info_label.setText(t("image_count", count=total))
-            self.process_btn.setText(t("btn_process"))
+            self.bridge.previewUpdated.emit('', '')
 
     def _start_processing(self):
-        """开始处理"""
-        # 优先处理勾选的，没有勾选则处理全部
-        checked = self.image_list.get_checked_files()
+        """开始处理（从菜单或快捷键）"""
+        checked = [item['path'] for item in self.bridge._file_list if item.get('checked')]
         if checked:
-            files_to_process = checked
+            files = checked
         else:
-            files_to_process = self.image_list.get_all_files()
+            files = self.bridge.get_all_files()
 
-        if not files_to_process:
+        if not files:
             QMessageBox.warning(self, t("app_name"), t("msg_no_images"))
             return
 
-        style_name = self.style_combo.currentText()
+        style_name = self.config.get('ui', {}).get('last_style', '佳能')
+        self._start_processing_with_files(files, style_name)
 
+    def _start_processing_with_files(self, files: list[str], style_name: str):
+        """使用指定文件开始处理"""
         processor = BatchProcessor(self.config, self.style_manager)
 
-        self.processing_thread = ProcessingThread(processor, files_to_process, style_name)
+        self.processing_thread = ProcessingThread(processor, files, style_name)
         self.processing_thread.progress.connect(self._on_progress)
         self.processing_thread.preview.connect(self._on_processing_preview)
         self.processing_thread.finished.connect(self._on_finished)
         self.processing_thread.error.connect(self._on_error)
 
-        self._set_processing_state(True)
         self.processing_thread.start()
 
     def _cancel_processing(self):
@@ -2121,18 +1993,24 @@ class MainWindow(QMainWindow):
 
     def _on_progress(self, current: int, total: int, filename: str):
         """更新进度"""
-        self.progress_bar.setMaximum(total)
-        self.progress_bar.setValue(current)
-        self.progress_label.setText(t("processing_progress", current=current, total=total, filename=filename))
+        self.bridge.progressUpdated.emit(current, total, filename)
         self.statusBar().showMessage(t("processing_progress", current=current, total=total, filename=filename))
 
     def _on_processing_preview(self, filepath: str, image: Image.Image):
         """处理时更新预览"""
-        self.result_preview.preview_widget.set_image(image)
+        try:
+            buffer = BytesIO()
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image.save(buffer, format='JPEG', quality=85)
+            result_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}"
+            self.bridge.previewUpdated.emit('', result_b64)
+        except Exception as e:
+            logger.debug(f"预览更新失败: {e}")
 
     def _on_finished(self, results: dict):
         """处理完成"""
-        self._set_processing_state(False)
+        self.bridge.processingFinished.emit(json.dumps(results))
 
         success = results.get('success', 0)
         failed = results.get('failed', 0)
@@ -2155,52 +2033,33 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, error: str):
         """处理错误"""
-        self._set_processing_state(False)
+        self.bridge.processingFinished.emit(json.dumps({"success": 0, "failed": 0}))
         self.statusBar().showMessage(t("msg_process_error"))
         QMessageBox.critical(self, t("error_title"), f"{t('msg_process_error')}: {error}")
-
-    def _set_processing_state(self, processing: bool):
-        """设置处理状态"""
-        self.process_btn.setVisible(not processing)
-        self.progress_widget.setVisible(processing)
-        self.add_btn.setEnabled(not processing)
-        self.clear_btn.setEnabled(not processing)
-        self.select_all_btn.setEnabled(not processing)
-        self.style_combo.setEnabled(not processing)
-
-        if not processing:
-            self.progress_bar.setValue(0)
 
     def _update_ui_texts(self):
         """更新所有 UI 文本"""
         self.setWindowTitle(t("app_name"))
-
-        # 重新创建菜单
         self._setup_menu()
 
-        # 更新左侧面板
-        self.add_btn.setText(t("btn_add_images"))
-        self.select_all_btn.setText(t("btn_select_all"))
-        self.clear_btn.setText(t("btn_clear_list"))
-        self.process_btn.setText(t("btn_process"))
-        self.cancel_btn.setText(t("btn_cancel"))
-        self.progress_label.setText(t("processing"))
-
-        # 更新图片列表
-        self.image_list.update_texts()
-        self._update_list_info()
-
-        # 更新预览面板标题
-        if hasattr(self.original_preview, 'title_label'):
-            self.original_preview.title_label.setText(t("preview_original"))
-        if hasattr(self.result_preview, 'title_label'):
-            self.result_preview.title_label.setText(t("preview_result"))
-
-        # 更新工具提示
-        self.add_btn.setToolTip(t("tooltip_add_images"))
-        self.clear_btn.setToolTip(t("tooltip_clear"))
-        self.process_btn.setToolTip(t("tooltip_process"))
-        self.style_combo.setToolTip(t("tooltip_style"))
+        # 通知 Web 端更新文本
+        translations = json.dumps({
+            "app_name": t("app_name"),
+            "panel_image_list": t("panel_image_list"),
+            "panel_watermark_style": t("panel_watermark_style"),
+            "search_placeholder": t("search_placeholder"),
+            "btn_add_images": t("btn_add_images"),
+            "btn_select_all": t("btn_select_all"),
+            "btn_clear_list": t("btn_clear_list"),
+            "btn_process": t("btn_process"),
+            "btn_cancel": t("btn_cancel"),
+            "preview_original": t("preview_original"),
+            "preview_result": t("preview_result"),
+            "preview_no_image": t("preview_no_image"),
+            "drop_hint": t("drop_hint"),
+            "msg_ready": t("msg_ready"),
+        }, ensure_ascii=False)
+        self.bridge.uiTextsUpdated.emit(translations)
 
         self.statusBar().showMessage(t("msg_ready"))
 
@@ -2222,7 +2081,6 @@ class MainWindow(QMainWindow):
         """恢复上次会话"""
         files = self.config_manager.get_last_session_files()
         if files:
-            # 过滤掉不存在的文件
             existing_files = [f for f in files if Path(f).exists()]
             if existing_files:
                 self._add_files(existing_files)
@@ -2230,14 +2088,13 @@ class MainWindow(QMainWindow):
     def _save_session(self):
         """保存当前会话"""
         if self.config.get('general', {}).get('restore_last_session', False):
-            files = self.image_list.get_all_files()
+            files = self.bridge.get_all_files()
             self.config_manager.save_session_files(files)
         else:
             self.config_manager.clear_session_files()
 
     def closeEvent(self, event):
         """窗口关闭事件"""
-        # 检查是否正在处理
         if self.processing_thread and self.processing_thread.isRunning():
             reply = QMessageBox.question(
                 self,
@@ -2252,7 +2109,6 @@ class MainWindow(QMainWindow):
             self.processing_thread.cancel()
             self.processing_thread.wait()
 
-        # 保存会话和UI状态
         self._save_session()
         self._save_ui_state()
         event.accept()
