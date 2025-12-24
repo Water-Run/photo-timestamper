@@ -1,6 +1,5 @@
-# main.py
 """
-Photo-Timestamper 入口点
+Photo-Timestamper Entry Point&入口点
 """
 
 import sys
@@ -13,9 +12,10 @@ from source.ui import run_app
 
 
 def main():
-    """程序主入口"""
+    """Program main entry&程序主入口"""
     run_app()
 
 
 if __name__ == "__main__":
     main()
+    

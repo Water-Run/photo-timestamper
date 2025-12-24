@@ -1,4 +1,3 @@
-# __init__.py
 """
 Photo-Timestamper - 照片时间戳水印工具
 """
@@ -15,7 +14,8 @@ from .core import (
     TimeExtractor,
     WatermarkRenderer,
     process_single_image,
-    scan_images
+    scan_images,
+    L
 )
 
 from .ui import MainWindow, run_app
@@ -31,4 +31,5 @@ __all__ = [
     'scan_images',
     'MainWindow',
     'run_app',
+    'L',
 ]

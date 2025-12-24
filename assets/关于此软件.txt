@@ -1,7 +1,0 @@
-照片时间水印添加器(photo-timestamper)顾名思义, 用来为照片添加时间水印.
-核心特点是仿照相机原厂风格的水印, 包括自动EXIF读取和批量处理等能力.
-应用使用PyQT开发, 打包为exe可执行文件. 由于采用单文件模式进行打包, 初次启动可能会消耗较多的时间.
-
----
-作者: WaterRun
-如果项目对你有帮助, 不妨前往https://github.com/Water-Run/photo-timestamper点一个Star表示支持 :)

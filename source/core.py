@@ -1,20 +1,82 @@
-# core.py
 """
-Photo-Timestamper 核心处理模块
+Photo-Timestamper Core Module&照片时间戳核心模块
 """
 
 import os
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Tuple, Optional
 
 import yaml
 from PIL import Image, ImageDraw, ImageFont
 import piexif
 import simpsave as ss
 
-# 配置日志
+
+# ==================== Localization System&本地化系统 ====================
+
+class LocalizationManager:
+    """
+    Bilingual localization manager&双语本地化管理器
+    Format: "English&中文"
+    """
+    
+    _instance = None
+    _language = "zh"  # "en" or "zh"
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    @classmethod
+    def set_language(cls, lang: str):
+        """Set current language&设置当前语言"""
+        if lang in ("en", "zh", "zh-CN", "en-US"):
+            cls._language = "zh" if lang.startswith("zh") else "en"
+    
+    @classmethod
+    def get_language(cls) -> str:
+        """Get current language&获取当前语言"""
+        return cls._language
+    
+    @classmethod
+    def parse(cls, text: str) -> str:
+        """
+        Parse bilingual text&解析双语文本
+        Input: "English&中文" -> Output based on current language
+        """
+        if not text or "&" not in text:
+            return text
+        
+        parts = text.split("&", 1)
+        if len(parts) != 2:
+            return text
+        
+        en_text, zh_text = parts
+        return zh_text.strip() if cls._language == "zh" else en_text.strip()
+
+
+def L(text: str) -> str:
+    """
+    Shortcut for localization&本地化快捷函数
+    Usage: L("Hello&你好") -> "你好" or "Hello"
+    """
+    return LocalizationManager.parse(text)
+
+
+# ==================== Logging Configuration&日志配置 ====================
+
+class BilingualFormatter(logging.Formatter):
+    """Formatter that parses bilingual messages&解析双语消息的格式化器"""
+    
+    def format(self, record):
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            record.msg = L(record.msg)
+        return super().format(record)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -23,31 +85,37 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+for handler in logging.root.handlers:
+    handler.setFormatter(BilingualFormatter('%(asctime)s - %(levelname)s - %(message)s'))
+
 logger = logging.getLogger(__name__)
 
-# simpsave 配置文件
+
+# ==================== Configuration Files&配置文件 ====================
+
 SS_CONFIG_FILE = ':ss:photo_timestamper_config.json'
 SS_SESSION_FILE = ':ss:photo_timestamper_session.json'
 
 
 def get_base_path() -> Path:
-    """获取程序基础路径"""
+    """Get program base path&获取程序基础路径"""
     return Path(__file__).parent.parent
 
 
 class ConfigManager:
-    """配置管理器 - 使用 simpsave"""
+    """Configuration Manager&配置管理器"""
 
     DEFAULT_CONFIG = {
         "general": {
-            "language": "zh-CN",
+            "language": "zh",
             "first_run": True,
-            "restore_last_session": False
+            "restore_last_session": True
         },
         "time_source": {
             "primary": "exif",
-            "fallback_enabled": True,
-            "fallback_to": "file_modified"
+            "fallback_mode": "error",  # error, file_modified, file_created, custom
+            "custom_time": ""
         },
         "output": {
             "same_directory": True,
@@ -58,7 +126,7 @@ class ConfigManager:
             "overwrite_existing": False
         },
         "ui": {
-            "last_style": "佳能",
+            "last_style": "CANON&佳能",
             "preview_enabled": True,
             "window_geometry": ""
         }
@@ -68,33 +136,30 @@ class ConfigManager:
         self._config = None
 
     def load(self) -> dict:
-        """加载配置"""
+        """Load configuration&加载配置"""
         if self._config is not None:
             return self._config
 
         try:
-            # 检查配置是否存在
             if ss.has('config', file=SS_CONFIG_FILE):
                 stored_config = ss.read('config', file=SS_CONFIG_FILE)
                 if stored_config is not None:
                     self._config = self._merge_with_defaults(stored_config)
-                    logger.info("配置已从 simpsave 加载")
+                    logger.info("Configuration loaded from simpsave&配置已从simpsave加载")
                 else:
                     self._config = self._get_default_copy()
                     self._save_to_file(self._config)
-                    logger.info("已创建默认配置")
+                    logger.info("Default configuration created&已创建默认配置")
             else:
-                # 配置不存在，创建默认配置
                 self._config = self._get_default_copy()
                 self._save_to_file(self._config)
-                logger.info("已创建默认配置")
+                logger.info("Default configuration created&已创建默认配置")
         except FileNotFoundError:
-            # 文件不存在，创建默认配置
             self._config = self._get_default_copy()
             self._save_to_file(self._config)
-            logger.info("配置文件不存在，已创建默认配置")
+            logger.info("Configuration file not found, created default&配置文件不存在，已创建默认配置")
         except Exception as e:
-            logger.warning(f"加载配置时出现问题，使用默认配置: {e}")
+            logger.warning(f"Error loading configuration, using default&加载配置时出现问题，使用默认配置: {e}")
             self._config = self._get_default_copy()
             try:
                 self._save_to_file(self._config)
@@ -104,29 +169,29 @@ class ConfigManager:
         return self._config
 
     def _save_to_file(self, config: dict) -> None:
-        """保存配置到文件（内部方法）"""
+        """Save configuration to file (internal)&保存配置到文件（内部方法）"""
         try:
             ss.write('config', config, file=SS_CONFIG_FILE)
         except Exception as e:
-            logger.error(f"保存配置失败: {e}")
+            logger.error(f"Failed to save configuration&保存配置失败: {e}")
 
     def save(self, config: dict) -> None:
-        """保存配置"""
+        """Save configuration&保存配置"""
         try:
             ss.write('config', config, file=SS_CONFIG_FILE)
             self._config = config
-            logger.info("配置已保存")
+            logger.info("Configuration saved&配置已保存")
         except Exception as e:
-            logger.error(f"保存配置失败: {e}")
+            logger.error(f"Failed to save configuration&保存配置失败: {e}")
             raise
 
     def _get_default_copy(self) -> dict:
-        """获取默认配置的深拷贝"""
+        """Get a deep copy of default configuration&获取默认配置的深拷贝"""
         import copy
         return copy.deepcopy(self.DEFAULT_CONFIG)
 
     def _merge_with_defaults(self, stored: dict) -> dict:
-        """合并存储的配置与默认配置"""
+        """Merge stored configuration with defaults&合并存储的配置与默认配置"""
         import copy
         result = copy.deepcopy(self.DEFAULT_CONFIG)
         for section, values in stored.items():
@@ -137,22 +202,22 @@ class ConfigManager:
         return result
 
     def get_default(self) -> dict:
-        """获取默认配置"""
+        """Get default configuration&获取默认配置"""
         return self._get_default_copy()
 
     def is_first_run(self) -> bool:
-        """检查是否首次运行"""
+        """Check if this is the first run&检查是否首次运行"""
         config = self.load()
         return config.get('general', {}).get('first_run', True)
 
     def set_first_run_complete(self):
-        """标记首次运行完成"""
+        """Mark first run as complete&标记首次运行完成"""
         config = self.load()
         config['general']['first_run'] = False
         self.save(config)
 
     def get_last_session_files(self) -> list:
-        """获取上次会话的文件列表"""
+        """Get files from last session&获取上次会话的文件列表"""
         try:
             if ss.has('last_session_files', file=SS_SESSION_FILE):
                 files = ss.read('last_session_files', file=SS_SESSION_FILE)
@@ -162,14 +227,14 @@ class ConfigManager:
             return []
 
     def save_session_files(self, files: list) -> None:
-        """保存当前会话的文件列表"""
+        """Save current session files&保存当前会话的文件列表"""
         try:
             ss.write('last_session_files', files, file=SS_SESSION_FILE)
         except Exception as e:
-            logger.error(f"保存会话文件失败: {e}")
+            logger.error(f"Failed to save session files&保存会话文件失败: {e}")
 
     def clear_session_files(self) -> None:
-        """清除会话文件"""
+        """Clear session files&清除会话文件"""
         try:
             if ss.has('last_session_files', file=SS_SESSION_FILE):
                 ss.remove('last_session_files', file=SS_SESSION_FILE)
@@ -178,7 +243,7 @@ class ConfigManager:
 
 
 class StyleManager:
-    """样式管理器"""
+    """Style Manager&样式管理器"""
 
     FONT_MAPPING = {
         "DS-Digital.ttf": "DS-Digital/DS-DIGIB.TTF",
@@ -201,7 +266,7 @@ class StyleManager:
         self._styles_cache: dict = {}
 
     def list_styles(self) -> list[str]:
-        """获取所有可用样式名称列表"""
+        """Get all available style names&获取所有可用样式名称列表"""
         styles = []
         if self.styles_dir.exists():
             for file in self.styles_dir.glob("*.yml"):
@@ -209,14 +274,12 @@ class StyleManager:
             for file in self.styles_dir.glob("*.yaml"):
                 styles.append(file.stem)
 
-        brand_order = ["佳能", "尼康", "富士", "宾得", "索尼", "松下", "小米"]
-        default_order = ["默认红", "默认黄", "默认绿", "默认蓝", "默认白", "默认灰"]
-
+        # Sort by brand priority&按品牌优先级排序
+        brand_order = ["CANON&佳能", "NIKON&尼康", "FUJIFILM&富士", "PENTAX&宾得", 
+                       "SONY&索尼", "PANASONIC&松下", "XIAOMI&小米"]
+        
         sorted_styles = []
         for name in brand_order:
-            if name in styles:
-                sorted_styles.append(name)
-        for name in default_order:
             if name in styles:
                 sorted_styles.append(name)
         for name in styles:
@@ -225,30 +288,36 @@ class StyleManager:
 
         return sorted_styles
 
+    def get_style_display_name(self, style_name: str) -> str:
+        """Get localized display name for style&获取样式的本地化显示名称"""
+        return L(style_name)
+
     def load_style(self, name: str) -> dict:
-        """加载指定样式配置"""
+        """Load style configuration using simpsave&使用simpsave读取样式配置"""
         if name in self._styles_cache:
             return self._styles_cache[name]
 
         style_path = self.styles_dir / f"{name}.yml"
         if not style_path.exists():
             style_path = self.styles_dir / f"{name}.yaml"
-
         if not style_path.exists():
-            raise FileNotFoundError(f"样式文件不存在: {name}")
+            raise FileNotFoundError(f"Style file not found&样式文件不存在: {name}")
 
         try:
-            with open(style_path, 'r', encoding='utf-8') as f:
-                style = yaml.safe_load(f)
+            style = {
+                "font": ss.read("font", file=str(style_path)),
+                "color": ss.read("color", file=str(style_path)),
+                "position": ss.read("position", file=str(style_path)),
+                "format": ss.read("format", file=str(style_path)),
+                "effects": ss.read("effects", file=str(style_path)),
+            }
             self._styles_cache[name] = style
-            logger.info(f"已加载样式: {name}")
             return style
         except Exception as e:
-            logger.error(f"加载样式失败 [{name}]: {e}")
-            raise
-
+            raise FileNotFoundError(f"Cannot read style from SimpSave&无法从SimpSave读取样式 [{name}]: {e}")
+        
     def get_font_path(self, font_file: str) -> Path | None:
-        """获取字体文件完整路径"""
+        """Get full path to font file&获取字体文件完整路径"""
         if font_file in self.FONT_MAPPING:
             mapped_path = self.fonts_dir / self.FONT_MAPPING[font_file]
             if mapped_path.exists():
@@ -262,22 +331,22 @@ class StyleManager:
             if path.suffix.lower() in ['.ttf', '.otf']:
                 return path
 
-        logger.warning(f"字体文件未找到: {font_file}，将使用系统默认字体")
+        logger.warning(f"Font file not found, using system default&字体文件未找到，将使用系统默认字体: {font_file}")
         return None
 
 
 class TimeExtractor:
-    """时间提取器"""
+    """Time Extractor&时间提取器"""
 
     def __init__(self, primary: str = "exif",
-                 fallback_enabled: bool = True,
-                 fallback_to: str = "file_modified"):
+                 fallback_mode: str = "error",
+                 custom_time: str = ""):
         self.primary = primary
-        self.fallback_enabled = fallback_enabled
-        self.fallback_to = fallback_to
+        self.fallback_mode = fallback_mode
+        self.custom_time = custom_time
 
     def extract(self, image_path: str | Path) -> datetime:
-        """从图片提取时间信息"""
+        """Extract time information from image&从图片提取时间信息"""
         image_path = Path(image_path)
 
         if self.primary == "exif":
@@ -285,16 +354,42 @@ class TimeExtractor:
             if exif_time:
                 return exif_time
 
-            if self.fallback_enabled:
-                logger.info(f"EXIF时间不可用，降级使用{self.fallback_to}: {image_path.name}")
-                return self.get_file_datetime(image_path, self.fallback_to)
+            # Handle fallback based on mode
+            if self.fallback_mode == "error":
+                raise ValueError(f"Cannot get EXIF time&无法获取EXIF时间: {image_path}")
+            elif self.fallback_mode == "file_modified":
+                logger.info(f"EXIF unavailable, using file modified time&EXIF时间不可用，使用文件修改时间: {image_path.name}")
+                return self.get_file_datetime(image_path, "file_modified")
+            elif self.fallback_mode == "file_created":
+                logger.info(f"EXIF unavailable, using file created time&EXIF时间不可用，使用文件创建时间: {image_path.name}")
+                return self.get_file_datetime(image_path, "file_created")
+            elif self.fallback_mode == "custom":
+                if self.custom_time:
+                    try:
+                        return datetime.strptime(self.custom_time, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        try:
+                            return datetime.strptime(self.custom_time, "%Y-%m-%d")
+                        except ValueError:
+                            raise ValueError(f"Invalid custom time format&无效的自定义时间格式: {self.custom_time}")
+                raise ValueError(f"Custom time not set&未设置自定义时间")
             else:
-                raise ValueError(f"无法获取EXIF时间且未启用降级: {image_path}")
+                raise ValueError(f"Unknown fallback mode&未知的降级模式: {self.fallback_mode}")
+        elif self.primary == "custom":
+            if self.custom_time:
+                try:
+                    return datetime.strptime(self.custom_time, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    try:
+                        return datetime.strptime(self.custom_time, "%Y-%m-%d")
+                    except ValueError:
+                        raise ValueError(f"Invalid custom time format&无效的自定义时间格式: {self.custom_time}")
+            raise ValueError(f"Custom time not set&未设置自定义时间")
         else:
             return self.get_file_datetime(image_path, self.primary)
 
     def get_exif_datetime(self, image_path: Path) -> datetime | None:
-        """读取EXIF拍摄时间"""
+        """Read EXIF capture time&读取EXIF拍摄时间"""
         try:
             exif_dict = piexif.load(str(image_path))
 
@@ -319,11 +414,11 @@ class TimeExtractor:
             return None
 
         except Exception as e:
-            logger.debug(f"读取EXIF失败 [{image_path.name}]: {e}")
+            logger.debug(f"Failed to read EXIF&读取EXIF失败 [{image_path.name}]: {e}")
             return None
 
     def get_file_datetime(self, image_path: Path, type_: str) -> datetime:
-        """读取文件时间（modified/created）"""
+        """Read file time (modified/created)&读取文件时间（modified/created）"""
         stat = image_path.stat()
 
         if type_ == "file_modified":
@@ -333,19 +428,19 @@ class TimeExtractor:
                 return datetime.fromtimestamp(stat.st_birthtime)
             return datetime.fromtimestamp(stat.st_ctime)
         else:
-            raise ValueError(f"未知的时间类型: {type_}")
+            raise ValueError(f"Unknown time type&未知的时间类型: {type_}")
 
 
 class WatermarkRenderer:
-    """水印渲染器"""
+    """Watermark Renderer&水印渲染器"""
 
     def __init__(self, style: dict, fonts_dir: Path):
-        self.style = style
+        self.style = style or {}
         self.fonts_dir = fonts_dir
         self._font_cache: dict = {}
 
     def render(self, image: Image.Image, timestamp: datetime) -> Image.Image:
-        """在图片上渲染水印并返回新图片"""
+        """Render watermark on image and return new image&在图片上渲染水印并返回新图片"""
         if image.mode != 'RGB':
             image = image.convert('RGB')
 
@@ -369,11 +464,9 @@ class WatermarkRenderer:
                 self.style.get('color', {}).get('shadow', '#000000'),
                 effects.get('shadow_opacity', 0.3)
             )
-
             scale = font_size / 30
             offset_x = int(effects.get('shadow_offset_x', 2) * scale)
             offset_y = int(effects.get('shadow_offset_y', 2) * scale)
-
             draw.text((x + offset_x, y + offset_y), text, font=font, fill=shadow_color)
 
         text_color = self._parse_color(
@@ -385,8 +478,8 @@ class WatermarkRenderer:
         return result
 
     def render_preview(self, image: Image.Image, timestamp: datetime,
-                       preview_size: tuple[int, int]) -> Image.Image:
-        """渲染用于预览的缩略图（带水印）"""
+                       preview_size: Tuple[int, int]) -> Image.Image:
+        """Render thumbnail with watermark for preview&渲染用于预览的缩略图（带水印）"""
         watermarked = self.render(image, timestamp)
 
         img_ratio = watermarked.width / watermarked.height
@@ -400,19 +493,18 @@ class WatermarkRenderer:
             new_width = int(new_height * img_ratio)
 
         preview = watermarked.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
         return preview
 
-    def _calculate_font_size(self, image_size: tuple[int, int]) -> int:
-        """根据图片尺寸计算字体大小"""
+    def _calculate_font_size(self, image_size: Tuple[int, int]) -> int:
+        """Calculate font size based on image dimensions&根据图片尺寸计算字体大小"""
         short_edge = min(image_size)
         size_ratio = self.style.get('font', {}).get('size_ratio', 0.025)
         font_size = int(short_edge * size_ratio)
         return max(font_size, 12)
 
-    def _calculate_position(self, image_size: tuple[int, int],
-                            text_size: tuple[int, int]) -> tuple[int, int]:
-        """计算水印位置坐标"""
+    def _calculate_position(self, image_size: Tuple[int, int],
+                            text_size: Tuple[int, int]) -> Tuple[int, int]:
+        """Calculate watermark position coordinates&计算水印位置坐标"""
         width, height = image_size
         text_width, text_height = text_size
 
@@ -440,40 +532,38 @@ class WatermarkRenderer:
         return (x, y)
 
     def _format_timestamp(self, timestamp: datetime) -> str:
-        """格式化时间戳为显示文本"""
+        """Format timestamp to display text&格式化时间戳为显示文本"""
         format_config = self.style.get('format', {})
         pattern = format_config.get('date_pattern', '%y %m %d')
         prefix = format_config.get('prefix', '')
         suffix = format_config.get('suffix', '')
-
         formatted = timestamp.strftime(pattern)
         return f"{prefix}{formatted}{suffix}"
 
     def _get_font(self, size: int) -> ImageFont.FreeTypeFont:
-        """获取字体对象"""
-        cache_key = f"{self.style.get('font', {}).get('file', '')}_{size}"
+        """Get font object&获取字体对象"""
+        font_file = self.style.get('font', {}).get('file', 'Courier-Prime.ttf')
+        cache_key = f"{font_file}_{size}"
 
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
 
-        font_file = self.style.get('font', {}).get('file', 'Courier-Prime.ttf')
         font_path = StyleManager(fonts_dir=str(self.fonts_dir)).get_font_path(font_file)
-
         try:
             if font_path and font_path.exists():
                 font = ImageFont.truetype(str(font_path), size)
             else:
                 font = ImageFont.load_default()
-                logger.warning(f"使用系统默认字体替代: {font_file}")
+                logger.warning(f"Using system default font instead of&使用系统默认字体替代: {font_file}")
         except Exception as e:
-            logger.error(f"加载字体失败: {e}")
+            logger.error(f"Failed to load font&加载字体失败: {e}")
             font = ImageFont.load_default()
 
         self._font_cache[cache_key] = font
         return font
 
     def _parse_color(self, color_str: str, opacity: float = 1.0) -> tuple:
-        """解析颜色字符串为 RGBA 元组"""
+        """Parse color string to RGBA tuple&解析颜色字符串为RGBA元组"""
         if color_str.startswith('#'):
             color_str = color_str[1:]
 
@@ -489,25 +579,25 @@ class WatermarkRenderer:
             r, g, b = 255, 255, 255
 
         a = int(255 * opacity)
-
         return (r, g, b, a)
 
 
 class ImageProcessor:
-    """图片处理器"""
+    """Image Processor&图片处理器"""
 
     def __init__(self, config: dict, style_manager: StyleManager):
         self.config = config
         self.style_manager = style_manager
+        time_config = config.get('time_source', {})
         self.time_extractor = TimeExtractor(
-            primary=config.get('time_source', {}).get('primary', 'exif'),
-            fallback_enabled=config.get('time_source', {}).get('fallback_enabled', True),
-            fallback_to=config.get('time_source', {}).get('fallback_to', 'file_modified')
+            primary=time_config.get('primary', 'exif'),
+            fallback_mode=time_config.get('fallback_mode', 'error'),
+            custom_time=time_config.get('custom_time', '')
         )
 
     def process(self, input_path: str, style_name: str,
                 output_path: str | None = None) -> bool:
-        """处理单张图片"""
+        """Process single image&处理单张图片"""
         input_path = Path(input_path)
 
         try:
@@ -525,20 +615,20 @@ class ImageProcessor:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             if output_path.exists() and not self.config.get('output', {}).get('overwrite_existing', False):
-                logger.warning(f"输出文件已存在，跳过: {output_path}")
+                logger.warning(f"Output file exists, skipping&输出文件已存在，跳过: {output_path}")
                 return False
 
             self._save_with_exif(result, input_path, output_path)
 
-            logger.info(f"处理完成: {input_path.name} -> {output_path.name}")
+            logger.info(f"Processing complete&处理完成: {input_path.name} -> {output_path.name}")
             return True
 
         except Exception as e:
-            logger.error(f"处理失败 [{input_path.name}]: {e}")
-            return False
+            logger.error(f"Processing failed&处理失败 [{input_path.name}]: {e}")
+            raise
 
     def generate_output_path(self, input_path: Path, timestamp: datetime) -> Path:
-        """根据配置生成输出路径"""
+        """Generate output path based on configuration&根据配置生成输出路径"""
         output_config = self.config.get('output', {})
 
         if output_config.get('same_directory', True):
@@ -564,7 +654,7 @@ class ImageProcessor:
 
     def _save_with_exif(self, image: Image.Image, original_path: Path,
                         output_path: Path) -> None:
-        """保存图片并处理EXIF"""
+        """Save image with EXIF handling&保存图片并处理EXIF"""
         output_config = self.config.get('output', {})
         quality = output_config.get('jpeg_quality', 95)
         preserve_exif = output_config.get('preserve_exif', True)
@@ -580,13 +670,13 @@ class ImageProcessor:
                 exif_bytes = piexif.dump(exif_dict)
                 save_kwargs['exif'] = exif_bytes
             except Exception as e:
-                logger.debug(f"无法保留EXIF: {e}")
+                logger.debug(f"Cannot preserve EXIF&无法保留EXIF: {e}")
 
         image.save(output_path, 'JPEG', **save_kwargs)
 
 
 class BatchProcessor:
-    """批量处理引擎"""
+    """Batch Processing Engine&批量处理引擎"""
 
     def __init__(self, config: dict, style_manager: StyleManager):
         self.config = config
@@ -600,7 +690,7 @@ class BatchProcessor:
             progress_callback: Callable[[int, int, str], None] | None = None,
             preview_callback: Callable[[str, Image.Image], None] | None = None
     ) -> dict:
-        """批量处理图片"""
+        """Batch process images&批量处理图片"""
         self._cancelled = False
         results = {
             "success": 0,
@@ -614,12 +704,12 @@ class BatchProcessor:
         try:
             style = self.style_manager.load_style(style_name)
         except Exception as e:
-            results["errors"].append(f"加载样式失败: {e}")
-            return results
+            results["errors"].append(f"Failed to load style&加载样式失败: {e}")
+            raise Exception(f"Failed to load style&加载样式失败: {e}")
 
         for i, image_path in enumerate(image_paths):
             if self._cancelled:
-                logger.info("批处理已取消")
+                logger.info("Batch processing cancelled&批处理已取消")
                 break
 
             image_path = Path(image_path)
@@ -635,31 +725,36 @@ class BatchProcessor:
                     preview = renderer.render_preview(image, timestamp, (3600, 2700))
                     preview_callback(str(image_path), preview)
                 except Exception as e:
-                    logger.debug(f"生成预览失败: {e}")
+                    logger.debug(f"Failed to generate preview&生成预览失败: {e}")
 
             output_path = self._generate_indexed_output_path(
                 processor, image_path, i + 1
             )
 
-            success = processor.process(str(image_path), style_name, str(output_path))
-
-            if success:
-                results["success"] += 1
-            else:
+            try:
+                success = processor.process(str(image_path), style_name, str(output_path))
+                if success:
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(f"Processing failed&处理失败: {image_path.name}")
+            except Exception as e:
                 results["failed"] += 1
-                results["errors"].append(f"处理失败: {image_path.name}")
+                error_msg = str(e)
+                results["errors"].append(f"{image_path.name}: {error_msg}")
+                raise Exception(f"Processing failed&处理失败 [{image_path.name}]: {error_msg}")
 
-        logger.info(f"批处理完成: 成功 {results['success']}, 失败 {results['failed']}")
+        logger.info(f"Batch processing complete: success {results['success']}, failed {results['failed']}&批处理完成: 成功 {results['success']}, 失败 {results['failed']}")
         return results
 
     def cancel(self) -> None:
-        """取消当前批处理"""
+        """Cancel current batch processing&取消当前批处理"""
         self._cancelled = True
-        logger.info("正在取消批处理...")
+        logger.info("Cancelling batch processing...&正在取消批处理...")
 
     def _generate_indexed_output_path(self, processor: ImageProcessor,
                                       input_path: Path, index: int) -> Path:
-        """生成带序号的输出路径"""
+        """Generate indexed output path&生成带序号的输出路径"""
         output_config = self.config.get('output', {})
 
         if output_config.get('same_directory', True):
@@ -686,7 +781,7 @@ class BatchProcessor:
 
 
 def scan_images(directory: str, recursive: bool = True) -> list[str]:
-    """扫描目录中的图片文件"""
+    """Scan directory for image files&扫描目录中的图片文件"""
     directory = Path(directory)
     extensions = {'.jpg', '.jpeg', '.JPG', '.JPEG'}
     images = []
@@ -701,9 +796,9 @@ def scan_images(directory: str, recursive: bool = True) -> list[str]:
     return [str(p) for p in sorted(images)]
 
 
-def process_single_image(image_path: str, style_name: str = "佳能",
+def process_single_image(image_path: str, style_name: str = "CANON&佳能",
                          output_path: str | None = None) -> bool:
-    """处理单张图片的便捷函数"""
+    """Convenience function to process single image&处理单张图片的便捷函数"""
     config_manager = ConfigManager()
     config = config_manager.load()
     style_manager = StyleManager()
@@ -717,10 +812,11 @@ if __name__ == "__main__":
 
     style_manager = StyleManager()
     styles = style_manager.list_styles()
-    print(f"可用样式: {styles}")
+    print(f"Available styles&可用样式: {styles}")
 
     config_manager = ConfigManager()
     config = config_manager.load()
-    print(f"配置已加载")
+    print(f"Configuration loaded&配置已加载")
 
-    print("\n核心模块测试完成！")
+    print("\nCore module test complete!&核心模块测试完成！")
+    

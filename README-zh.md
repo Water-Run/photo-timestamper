@@ -1,6 +1,4 @@
-# 照片时间水印添加器
-
-`WaterRun`
+# 照片时间水印添加器  
 
 *[English](./README.md)*  
 
@@ -16,7 +14,7 @@
 
 ## 水印风格  
 
-`照片时间水印添加器`预设了多个预设水印, 包括契合相机原厂的风格:
+`照片时间水印添加器`预设了契合相机原厂风格的多个预设水印:
 
 - `佳能`  
 
@@ -34,4 +32,4 @@
 
 - `经典胶片`  
 
-> 可以通过向`style/`下添加符合规范的`YML`进行增加/修改预设. 使用[SimpSave](https://github.com/Water-Run/SimpSave/tree/master/source)进行格式化存储  
+> 可以通过向`style/`下添加符合规范的`YML`进行增加/修改预设. 使用[SimpSave](https://github.com/Water-Run/SimpSave/tree/master/source)进行格式化存储, 且将数据库命名为`英文&中文`  
