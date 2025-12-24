@@ -98,7 +98,7 @@ class WebBridge(QObject):
     def getTranslations(self) -> str:
         """Get all translation texts&获取所有翻译文本"""
         translations = {
-            "app_name": L("Photo Timestamper&照片时间戳"),
+            "app_name": L("Photo Timestamper&照片时间水印添加器"),
             "panel_image_list": L("Image List&图片列表"),
             "panel_watermark_style": L("Watermark Style&水印样式"),
             "search_placeholder": L("Search images...&搜索图片..."),
@@ -245,7 +245,7 @@ class WebBridge(QObject):
             files = [item['path'] for item in self._file_list]
 
         if not files:
-            QMessageBox.warning(self.main_window, L("Photo Timestamper&照片时间戳"), 
+            QMessageBox.warning(self.main_window, L("Photo Timestamper&照片时间水印添加器"), 
                               L("Please add images first&请先添加图片"))
             return
 
@@ -1762,7 +1762,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(L("About Photo Timestamper&关于照片时间戳"))
+        self.setWindowTitle(L("About Photo Timestamper&关于照片时间水印添加器"))
         self.setFixedSize(420, 480)
 
         from PyQt6.QtGui import QPixmap
@@ -2007,7 +2007,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(500, self._restore_last_session)
 
     def _init_ui(self):
-        self.setWindowTitle(L("Photo Timestamper&照片时间戳"))
+        self.setWindowTitle(L("Photo Timestamper&照片时间水印添加器"))
         self.setMinimumSize(1200, 700)
 
         # Set application icon
@@ -2199,7 +2199,7 @@ class MainWindow(QMainWindow):
             files = self.bridge.get_all_files()
 
         if not files:
-            QMessageBox.warning(self, L("Photo Timestamper&照片时间戳"), L("Please add images first&请先添加图片"))
+            QMessageBox.warning(self, L("Photo Timestamper&照片时间水印添加器"), L("Please add images first&请先添加图片"))
             return
 
         style_name = self.config.get('ui', {}).get('last_style', 'CANON&佳能')
@@ -2260,7 +2260,7 @@ class MainWindow(QMainWindow):
         if failed == 0:
             QMessageBox.information(
                 self, 
-                L("Photo Timestamper&照片时间戳"), 
+                L("Photo Timestamper&照片时间水印添加器"), 
                 L("Successfully processed {count} images&成功处理 {count} 张图片").replace("{count}", str(success))
             )
 
@@ -2271,12 +2271,12 @@ class MainWindow(QMainWindow):
 
     def _update_ui_texts(self):
         """Update all UI texts&更新所有UI文本"""
-        self.setWindowTitle(L("Photo Timestamper&照片时间戳"))
+        self.setWindowTitle(L("Photo Timestamper&照片时间水印添加器"))
         self._setup_menu()
 
         # Notify web to update texts
         translations = json.dumps({
-            "app_name": L("Photo Timestamper&照片时间戳"),
+            "app_name": L("Photo Timestamper&照片时间水印添加器"),
             "panel_image_list": L("Image List&图片列表"),
             "panel_watermark_style": L("Watermark Style&水印样式"),
             "search_placeholder": L("Search images...&搜索图片..."),
