@@ -1,8 +1,7 @@
 """
-Photo-Timestamper PyQt6 User Interface&用户界面
-Lightroom Style Professional Interface - QtWebEngine Version v2.1
+Photo-Timestamper PyQt6 User Interface
+重写版本 - 修复选择逻辑、筛选器、快捷键等问题
 """
-
 import sys
 import os
 import subprocess
@@ -10,20 +9,17 @@ import json
 import base64
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 from io import BytesIO
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QMessageBox, QDialog, QLabel, QPushButton,
-    QComboBox, QSplitter, QGroupBox, QRadioButton, QButtonGroup,
-    QCheckBox, QLineEdit, QSpinBox, QDateTimeEdit
+    QApplication, QMainWindow, QFileDialog,
+    QMessageBox, QDialog, QLabel, QPushButton, QComboBox, QGroupBox,
+    QRadioButton, QButtonGroup, QCheckBox, QLineEdit, QSpinBox, QDateTimeEdit
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, pyqtSlot, QObject, QTimer, QDateTime
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QTimer, QDateTime, pyqtSlot, QObject
 from PyQt6.QtGui import QIcon, QShortcut, QKeySequence
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
-
 from PIL import Image
 
 from .core import (
@@ -34,11 +30,8 @@ from .core import (
 from . import __version__, __author__, __collaborators__
 
 
-# ==================== Processing Thread&处理线程 ====================
-
+# ==================== Processing Thread ====================
 class ProcessingThread(QThread):
-    """Background processing thread&后台处理线程"""
-
     progress = pyqtSignal(int, int, str)
     preview = pyqtSignal(str, object)
     finished = pyqtSignal(dict)
@@ -60,7 +53,7 @@ class ProcessingThread(QThread):
             )
             self.finished.emit(results)
         except Exception as e:
-            logger.error(f"Processing thread exception&处理线程异常: {e}")
+            logger.error(f"Processing thread exception: {e}")
             self.error.emit(str(e))
 
     def _on_progress(self, current: int, total: int, filename: str):
@@ -74,11 +67,8 @@ class ProcessingThread(QThread):
 
 
 # ==================== Web Bridge ====================
-
 class WebBridge(QObject):
-    """Python to JavaScript bridge&Python与JavaScript的桥接对象"""
-
-    filesAdded = pyqtSignal(str)
+    filesUpdated = pyqtSignal(str)
     previewUpdated = pyqtSignal(str, str)
     progressUpdated = pyqtSignal(int, int, str)
     processingFinished = pyqtSignal(str)
@@ -86,29 +76,30 @@ class WebBridge(QObject):
     statusMessage = pyqtSignal(str)
     uiTextsUpdated = pyqtSignal(str)
     showProgressOverlay = pyqtSignal(bool)
+    stylesUpdated = pyqtSignal(str)
 
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
         self._file_list: list[dict] = []
-        self._thumbnail_queue: list[str] = []
-        self._is_loading_thumbnails = False
 
+    # ---------- API to JS ----------
     @pyqtSlot(result=str)
     def getTranslations(self) -> str:
-        """Get all translation texts&获取所有翻译文本"""
-        translations = {
+        t = {
             "app_name": L("Photo Timestamper&照片时间水印添加器"),
             "panel_image_list": L("Image List&图片列表"),
             "panel_watermark_style": L("Watermark Style&水印样式"),
             "search_placeholder": L("Search images...&搜索图片..."),
             "image_count": L("{count} images&共 {count} 张图片"),
+            "selected_count": L("{selected}/{total} selected&已选择 {selected}/{total} 张"),
             "btn_add_images": L("Add Images&添加图片"),
             "btn_add_folder": L("Add Folder&添加文件夹"),
             "btn_clear_list": L("Clear&清空"),
             "btn_select_all": L("Select All&全选"),
+            "btn_deselect_all": L("Deselect All&取消全选"),
             "btn_process": L("Start Processing&开始处理"),
-            "btn_process_selected": L("Process Selected&处理选中"),
+            "btn_process_selected": L("Process Selected ({count})&处理选中 ({count})"),
             "btn_cancel": L("Cancel&取消"),
             "preview_original": L("Original&原图"),
             "preview_result": L("Preview&效果预览"),
@@ -117,8 +108,7 @@ class WebBridge(QObject):
             "processing": L("Processing...&处理中..."),
             "exporting": L("Exporting {current}/{total}&导出第 {current}/{total} 张"),
             "msg_ready": L("Ready&就绪"),
-            "ctx_check_selected": L("Check Selected&勾选选中项"),
-            "ctx_uncheck_selected": L("Uncheck Selected&取消勾选选中项"),
+            "msg_no_selection": L("Please select images to process&请选择要处理的图片"),
             "ctx_select_all": L("Select All&全选"),
             "ctx_deselect_all": L("Deselect All&取消全选"),
             "ctx_open_file": L("Open File&打开文件"),
@@ -126,23 +116,15 @@ class WebBridge(QObject):
             "ctx_remove_selected": L("Remove Selected&移除选中项"),
             "ctx_clear_all": L("Clear All&清空所有"),
             "error_title": L("Error&错误"),
+            "close": L("Close&关闭"),
         }
-        return json.dumps(translations, ensure_ascii=False)
+        return json.dumps(t, ensure_ascii=False)
 
     @pyqtSlot(result=str)
     def getStyles(self) -> str:
-        """Get available style list&获取可用样式列表"""
         styles = self.main_window.style_manager.list_styles()
         last_style = self.main_window.config.get('ui', {}).get('last_style', 'CANON&佳能')
-        
-        # Create display names
-        style_data = []
-        for style in styles:
-            style_data.append({
-                "value": style,
-                "display": L(style)
-            })
-        
+        style_data = [{"value": s, "display": L(s)} for s in styles]
         current = last_style if last_style in styles else (styles[0] if styles else "")
         return json.dumps({
             "styles": style_data,
@@ -152,113 +134,99 @@ class WebBridge(QObject):
 
     @pyqtSlot(result=str)
     def getFileList(self) -> str:
-        """Get file list&获取文件列表"""
         return json.dumps(self._file_list, ensure_ascii=False)
 
     @pyqtSlot()
     def requestAddFiles(self):
-        """Request to add files&请求添加文件"""
         self.main_window._show_import_dialog()
 
     @pyqtSlot()
     def requestAddFolder(self):
-        """Request to add folder&请求添加文件夹"""
         self.main_window._import_folder()
 
     @pyqtSlot()
     def requestClearFiles(self):
-        """Request to clear files&请求清空文件"""
         self._file_list.clear()
-        self._thumbnail_queue.clear()
-        self.filesAdded.emit(json.dumps(self._file_list))
+        self.filesUpdated.emit(json.dumps(self._file_list))
         self.statusMessage.emit(L("Image list cleared&已清空图片列表"))
 
     @pyqtSlot(str)
-    def setFileChecked(self, data: str):
-        """Set file checked state&设置文件勾选状态"""
+    def setFileSelected(self, data: str):
+        """设置单个文件的选中状态"""
         info = json.loads(data)
         path = info.get('path')
-        checked = info.get('checked', False)
+        selected = info.get('selected', False)
         for item in self._file_list:
             if item['path'] == path:
-                item['checked'] = checked
+                item['selected'] = selected
                 break
 
-    @pyqtSlot()
-    def checkAll(self):
-        """Check all&全选"""
-        for item in self._file_list:
-            item['checked'] = True
-        self.filesAdded.emit(json.dumps(self._file_list))
-
-    @pyqtSlot()
-    def uncheckAll(self):
-        """Uncheck all&取消全选"""
-        for item in self._file_list:
-            item['checked'] = False
-        self.filesAdded.emit(json.dumps(self._file_list))
-
     @pyqtSlot(str)
-    def checkSelected(self, selected_json: str):
-        """Check selected items&勾选选中项"""
-        selected = set(json.loads(selected_json))
+    def setMultipleSelected(self, data: str):
+        """批量设置选中状态"""
+        info = json.loads(data)
+        paths = set(info.get('paths', []))
+        selected = info.get('selected', False)
         for item in self._file_list:
-            if item['path'] in selected:
-                item['checked'] = True
-        self.filesAdded.emit(json.dumps(self._file_list))
+            if item['path'] in paths:
+                item['selected'] = selected
 
-    @pyqtSlot(str)
-    def uncheckSelected(self, selected_json: str):
-        """Uncheck selected items&取消勾选选中项"""
-        selected = set(json.loads(selected_json))
+    @pyqtSlot()
+    def selectAll(self):
         for item in self._file_list:
-            if item['path'] in selected:
-                item['checked'] = False
-        self.filesAdded.emit(json.dumps(self._file_list))
+            item['selected'] = True
+        self.filesUpdated.emit(json.dumps(self._file_list))
+
+    @pyqtSlot()
+    def deselectAll(self):
+        for item in self._file_list:
+            item['selected'] = False
+        self.filesUpdated.emit(json.dumps(self._file_list))
 
     @pyqtSlot(str)
     def removeSelected(self, selected_json: str):
-        """Remove selected items&移除选中项"""
         selected = set(json.loads(selected_json))
+        before = len(self._file_list)
         self._file_list = [item for item in self._file_list if item['path'] not in selected]
-        self.filesAdded.emit(json.dumps(self._file_list))
-        self.statusMessage.emit(L("Removed {count} images&已移除 {count} 张图片").replace("{count}", str(len(selected))))
+        removed = before - len(self._file_list)
+        self.filesUpdated.emit(json.dumps(self._file_list))
+        self.statusMessage.emit(
+            L("Removed {count} images&已移除 {count} 张图片").replace("{count}", str(removed))
+        )
 
     @pyqtSlot(str)
-    def selectFile(self, filepath: str):
-        """Select file for preview&选择文件进行预览"""
+    def requestPreview(self, filepath: str):
+        """请求预览指定图片"""
         self.main_window._update_preview(filepath)
 
     @pyqtSlot(str)
     def setStyle(self, style_name: str):
-        """Set current style&设置当前样式"""
         self.main_window.config['ui']['last_style'] = style_name
         self.main_window.config_manager.save(self.main_window.config)
 
     @pyqtSlot(str)
-    def startProcessing(self, style_name: str):
-        """Start processing&开始处理"""
-        checked = [item['path'] for item in self._file_list if item.get('checked')]
-        if checked:
-            files = checked
-        else:
-            files = [item['path'] for item in self._file_list]
-
-        if not files:
-            QMessageBox.warning(self.main_window, L("Photo Timestamper&照片时间水印添加器"), 
-                              L("Please add images first&请先添加图片"))
+    def startProcessing(self, data: str):
+        """开始处理，data 包含 style_name 和 selected_paths"""
+        info = json.loads(data)
+        style_name = info.get('style_name', '')
+        selected_paths = info.get('selected_paths', [])
+        
+        if not selected_paths:
+            QMessageBox.warning(
+                self.main_window,
+                L("Photo Timestamper&照片时间水印添加器"),
+                L("Please select images to process&请选择要处理的图片")
+            )
             return
-
-        self.main_window._start_processing_with_files(files, style_name)
+        
+        self.main_window._start_processing_with_files(selected_paths, style_name)
 
     @pyqtSlot()
     def cancelProcessing(self):
-        """Cancel processing&取消处理"""
         self.main_window._cancel_processing()
 
     @pyqtSlot(str)
     def openFile(self, filepath: str):
-        """Open file&打开文件"""
         try:
             if sys.platform == 'win32':
                 os.startfile(filepath)
@@ -267,11 +235,10 @@ class WebBridge(QObject):
             else:
                 subprocess.run(['xdg-open', filepath])
         except Exception as e:
-            logger.error(f"Failed to open file&打开文件失败: {e}")
+            logger.error(f"Failed to open file: {e}")
 
     @pyqtSlot(str)
     def openFolder(self, filepath: str):
-        """Open containing folder&打开所在文件夹"""
         try:
             folder = str(Path(filepath).parent)
             if sys.platform == 'win32':
@@ -281,1222 +248,1200 @@ class WebBridge(QObject):
             else:
                 subprocess.run(['xdg-open', folder])
         except Exception as e:
-            logger.error(f"Failed to open folder&打开文件夹失败: {e}")
+            logger.error(f"Failed to open folder: {e}")
 
     @pyqtSlot()
     def showSettings(self):
-        """Show settings&显示设置"""
         self.main_window._show_settings()
 
     @pyqtSlot()
     def showAbout(self):
-        """Show about&显示关于"""
         self.main_window._show_about()
 
+    # ---------- Helpers ----------
     def add_files(self, files: list[str]) -> tuple[int, int]:
-        """Add files to list&添加文件到列表"""
         existing = {item['path'] for item in self._file_list}
         added = 0
         duplicates = 0
-
         for filepath in files:
             if filepath in existing:
                 duplicates += 1
                 continue
-
             filename = Path(filepath).name
+            thumb = self._make_thumb(filepath, max_size=128, quality=65)
             self._file_list.append({
                 'path': filepath,
                 'name': filename,
-                'checked': False,
-                'thumbnail': ''
+                'selected': False,
+                'thumbnail': thumb
             })
             existing.add(filepath)
             added += 1
-            self._thumbnail_queue.append(filepath)
-
-        self.filesAdded.emit(json.dumps(self._file_list))
-        
-        # Start loading thumbnails
-        if not self._is_loading_thumbnails and self._thumbnail_queue:
-            self._load_next_thumbnail()
-        
+        self.filesUpdated.emit(json.dumps(self._file_list))
         return added, duplicates
 
-    def _load_next_thumbnail(self):
-        """Load next thumbnail in queue&加载队列中的下一个缩略图"""
-        if not self._thumbnail_queue:
-            self._is_loading_thumbnails = False
-            return
-        
-        self._is_loading_thumbnails = True
-        filepath = self._thumbnail_queue.pop(0)
-        QTimer.singleShot(10, lambda: self._load_thumbnail(filepath))
-
-    def _load_thumbnail(self, filepath: str):
-        """Load single thumbnail&加载单个缩略图"""
+    def _make_thumb(self, path: str, max_size: int = 128, quality: int = 65) -> str:
         try:
-            # Check if file still in list
-            file_item = None
-            for item in self._file_list:
-                if item['path'] == filepath:
-                    file_item = item
-                    break
-            
-            if not file_item or file_item['thumbnail']:
-                self._load_next_thumbnail()
-                return
-
-            image = Image.open(filepath)
-            
-            # Calculate thumbnail size maintaining aspect ratio
-            max_size = (144, 108)
-            image.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-
-            buffer = BytesIO()
-            image.save(buffer, format='JPEG', quality=75)
-            b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            thumbnail_data = f"data:image/jpeg;base64,{b64}"
-
-            # Update file item
-            for item in self._file_list:
-                if item['path'] == filepath:
-                    item['thumbnail'] = thumbnail_data
-                    break
-
-            self.filesAdded.emit(json.dumps(self._file_list))
-
+            with Image.open(path) as im:
+                if im.mode not in ("RGB", "RGBA"):
+                    im = im.convert("RGB")
+                im.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                buf = BytesIO()
+                im.save(buf, format="JPEG", quality=quality)
+                b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                return f"data:image/jpeg;base64,{b64}"
         except Exception as e:
-            logger.debug(f"Failed to load thumbnail&加载缩略图失败: {e}")
-        
-        # Continue loading next
-        self._load_next_thumbnail()
+            logger.debug(f"Thumbnail failed [{path}]: {e}")
+            return ""
 
     def get_all_files(self) -> list[str]:
-        """Get all files&获取所有文件"""
         return [item['path'] for item in self._file_list]
 
-    def get_checked_count(self) -> int:
-        """Get checked count&获取勾选数量"""
-        return sum(1 for item in self._file_list if item.get('checked'))
+    def get_selected_files(self) -> list[str]:
+        return [item['path'] for item in self._file_list if item.get('selected')]
 
 
-# ==================== HTML Template&HTML模板 ====================
-
+# ==================== HTML ====================
 def get_html_content() -> str:
-    """Generate complete HTML content&生成完整的HTML内容"""
     return r'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Timestamper</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        :root {
-            --bg-primary: #1e1e1e;
-            --bg-secondary: #252525;
-            --bg-tertiary: #2d2d2d;
-            --bg-hover: #353535;
-            --bg-active: #404040;
-            --border-color: #3d3d3d;
-            --text-primary: #e0e0e0;
-            --text-secondary: #a0a0a0;
-            --text-muted: #606060;
-            --accent-blue: #0a84ff;
-            --accent-blue-hover: #409cff;
-            --accent-green: #34c759;
-            --accent-orange: #ff9500;
-            --accent-red: #ff3b30;
-            --status-height: 22px;
-        }
-
-        body {
-            font-family: "Microsoft YaHei", "Segoe UI", "SF Pro Display", sans-serif;
-            font-size: 12px;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            overflow: hidden;
-            height: 100vh;
-            user-select: none;
-        }
-
-        .main-container {
-            display: flex;
-            height: calc(100vh - var(--status-height));
-        }
-
-        .left-panel {
-            width: 280px;
-            min-width: 280px;
-            background-color: var(--bg-secondary);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            padding: 12px;
-        }
-
-        .panel-title {
-            color: var(--text-secondary);
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 8px 0 6px 0;
-        }
-
-        .list-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-
-        .list-info {
-            color: var(--text-muted);
-            font-size: 10px;
-        }
-
-        .search-box {
-            background-color: var(--bg-tertiary);
-            border: 1px solid #4d4d4d;
-            border-radius: 4px;
-            padding: 8px 12px;
-            color: var(--text-primary);
-            font-size: 12px;
-            width: 100%;
-            margin-bottom: 8px;
-            outline: none;
-        }
-
-        .search-box:focus {
-            border-color: var(--accent-blue);
-        }
-
-        .search-box::placeholder {
-            color: var(--text-muted);
-        }
-
-        .file-list-container {
-            flex: 1;
-            background-color: #2a2a2a;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .file-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 4px;
-        }
-
-        .file-list::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .file-list::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .file-list::-webkit-scrollbar-thumb {
-            background-color: #4d4d4d;
-            border-radius: 4px;
-        }
-
-        .file-list::-webkit-scrollbar-thumb:hover {
-            background-color: #5d5d5d;
-        }
-
-        .empty-hint {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: var(--text-muted);
-            font-size: 13px;
-            text-align: center;
-            line-height: 1.8;
-            padding: 40px;
-        }
-
-        .file-item {
-            display: flex;
-            align-items: center;
-            padding: 6px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-bottom: 2px;
-            gap: 10px;
-        }
-
-        .file-item:hover {
-            background-color: var(--bg-hover);
-        }
-
-        .file-item.selected {
-            background-color: var(--bg-active);
-        }
-
-        .checkmark {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            border: 2px solid #5d5d5d;
-            background-color: var(--bg-tertiary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            flex-shrink: 0;
-            transition: all 0.15s ease;
-        }
-
-        .checkmark:hover {
-            border-color: #7d7d7d;
-        }
-
-        .checkmark.checked {
-            background-color: var(--accent-green);
-            border-color: var(--accent-green);
-        }
-
-        .checkmark.checked::after {
-            content: '';
-            width: 6px;
-            height: 10px;
-            border: solid white;
-            border-width: 0 2px 2px 0;
-            transform: rotate(45deg);
-            margin-top: -2px;
-        }
-
-        .thumbnail {
-            width: 72px;
-            height: 54px;
-            background-color: #1a1a1a;
-            border-radius: 3px;
-            border: 1px solid var(--border-color);
-            overflow: hidden;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .thumbnail img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
-
-        .thumbnail-placeholder {
-            color: var(--text-muted);
-            font-size: 10px;
-        }
-
-        .file-name {
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-size: 12px;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 6px;
-            margin-top: 8px;
-        }
-
-        .btn {
-            background-color: var(--bg-tertiary);
-            border: 1px solid #4d4d4d;
-            border-radius: 4px;
-            padding: 6px 12px;
-            color: var(--text-primary);
-            font-size: 11px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            flex: 1;
-        }
-
-        .btn:hover {
-            background-color: #4d4d4d;
-            border-color: #5d5d5d;
-        }
-
-        .btn:active {
-            background-color: var(--bg-tertiary);
-        }
-
-        .btn:disabled {
-            background-color: var(--bg-tertiary);
-            color: var(--text-muted);
-            cursor: not-allowed;
-        }
-
-        .btn-primary {
-            background-color: var(--accent-blue);
-            border: none;
-            color: white;
-            font-weight: 600;
-        }
-
-        .btn-primary:hover {
-            background-color: var(--accent-blue-hover);
-        }
-
-        .btn-primary:disabled {
-            background-color: #404040;
-            color: #808080;
-        }
-
-        .btn-danger {
-            background-color: var(--accent-red);
-            border: none;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background-color: #ff5a52;
-        }
-
-        .btn-large {
-            padding: 10px 16px;
-            font-size: 13px;
-            min-height: 40px;
-        }
-
-        .style-section {
-            margin-top: 12px;
-        }
-
-        .style-select {
-            width: 100%;
-            background-color: var(--bg-tertiary);
-            border: 1px solid #4d4d4d;
-            border-radius: 4px;
-            padding: 8px 12px;
-            color: var(--text-primary);
-            font-size: 12px;
-            cursor: pointer;
-            outline: none;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23808080' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-        }
-
-        .style-select:hover {
-            border-color: #5d5d5d;
-        }
-
-        .style-select:focus {
-            border-color: var(--accent-blue);
-        }
-
-        .process-section {
-            margin-top: auto;
-            padding-top: 12px;
-        }
-
-        .preview-container {
-            flex: 1;
-            display: flex;
-            gap: 0;
-        }
-
-        .preview-panel {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 12px;
-            min-width: 0;
-        }
-
-        .preview-panel:first-child {
-            border-right: 1px solid var(--border-color);
-        }
-
-        .preview-area {
-            flex: 1;
-            background-color: #1a1a1a;
-            border: 1px solid var(--bg-tertiary);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .preview-area img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
-
-        .preview-placeholder {
-            color: var(--text-muted);
-            font-size: 12px;
-        }
-
-        .context-menu {
-            position: fixed;
-            background-color: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 6px;
-            min-width: 180px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            display: none;
-        }
-
-        .context-menu.visible {
-            display: block;
-        }
-
-        .context-menu-item {
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-
-        .context-menu-item:hover {
-            background-color: var(--accent-blue);
-        }
-
-        .context-menu-separator {
-            height: 1px;
-            background-color: var(--border-color);
-            margin: 6px 8px;
-        }
-
-        .drop-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(10, 132, 255, 0.1);
-            border: 3px dashed var(--accent-blue);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 999;
-            pointer-events: none;
-        }
-
-        .drop-overlay.visible {
-            display: flex;
-        }
-
-        .drop-overlay-text {
-            background-color: var(--bg-tertiary);
-            padding: 20px 40px;
-            border-radius: 8px;
-            font-size: 16px;
-            color: var(--accent-blue);
-        }
-
-        /* Progress Overlay - LR Style */
-        .progress-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
-        .progress-overlay.visible {
-            display: flex;
-        }
-
-        .progress-dialog {
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 24px 32px;
-            min-width: 400px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-        }
-
-        .progress-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 16px;
-            color: var(--text-primary);
-        }
-
-        .progress-bar-container {
-            height: 20px;
-            background-color: var(--bg-tertiary);
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 12px;
-            position: relative;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            background: repeating-linear-gradient(
-                -45deg,
-                var(--accent-orange),
-                var(--accent-orange) 10px,
-                #cc7a00 10px,
-                #cc7a00 20px
-            );
-            background-size: 28px 100%;
-            animation: progress-stripe 0.5s linear infinite;
-            border-radius: 10px;
-            transition: width 0.3s ease;
-        }
-
-        @keyframes progress-stripe {
-            0% { background-position: 0 0; }
-            100% { background-position: 28px 0; }
-        }
-
-        .progress-text {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-bottom: 16px;
-        }
-
-        .progress-error {
-            background-color: rgba(255, 59, 48, 0.1);
-            border: 1px solid var(--accent-red);
-            border-radius: 4px;
-            padding: 12px;
-            margin-top: 12px;
-            color: var(--accent-red);
-            font-size: 12px;
-            display: none;
-        }
-
-        .progress-error.visible {
-            display: block;
-        }
-
-        .progress-buttons {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 16px;
-        }
-
-        .status-bar {
-            height: var(--status-height);
-            background-color: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            padding: 0 10px;
-            font-size: 11px;
-            color: var(--text-muted);
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 5;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Timestamper</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252525;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: #353535;
+    --bg-active: #404040;
+    --border-color: #3d3d3d;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-muted: #707070;
+    --accent-blue: #0a84ff;
+    --accent-blue-light: #409cff;
+    --accent-green: #34c759;
+    --accent-orange: #ff9500;
+    --accent-red: #ff3b30;
+    --status-height: 22px;
+    --selection-bg: rgba(10, 132, 255, 0.25);
+    --selection-border: rgba(10, 132, 255, 0.6);
+}
+
+body {
+    font-family: "Microsoft YaHei", "Segoe UI", "SF Pro Display", sans-serif;
+    font-size: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    user-select: none;
+}
+
+.main-container {
+    display: flex;
+    height: calc(100vh - var(--status-height));
+}
+
+/* 左侧面板 */
+.left-panel {
+    width: 300px;
+    min-width: 300px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+}
+
+.panel-title {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    padding: 8px 0 6px 0;
+    text-transform: uppercase;
+}
+
+.list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.list-info {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.search-box {
+    background: var(--bg-tertiary);
+    border: 1px solid #4d4d4d;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    width: 100%;
+    margin-bottom: 8px;
+    outline: none;
+}
+
+.search-box:focus {
+    border-color: var(--accent-blue);
+}
+
+.search-box::placeholder {
+    color: var(--text-muted);
+}
+
+.file-list-container {
+    flex: 1;
+    background: #2a2a2a;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.file-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.file-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.file-list::-webkit-scrollbar-thumb {
+    background: #4d4d4d;
+    border-radius: 4px;
+}
+
+.empty-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    line-height: 1.8;
+    padding: 40px;
+}
+
+/* 文件项 */
+.file-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    gap: 10px;
+    border: 2px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.file-item:hover {
+    background: var(--bg-hover);
+}
+
+.file-item.selected {
+    background: var(--selection-bg);
+    border-color: var(--selection-border);
+}
+
+.file-item.selected .file-name {
+    color: #fff;
+    font-weight: 500;
+}
+
+.file-item.selected .thumbnail {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.3);
+}
+
+.thumbnail {
+    width: 72px;
+    height: 54px;
+    background: #111;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.thumbnail img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.thumbnail-placeholder {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+/* 按钮 */
+.button-group {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.btn {
+    background: var(--bg-tertiary);
+    border: 1px solid #4d4d4d;
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    flex: 1;
+}
+
+.btn:hover {
+    background: #4d4d4d;
+    border-color: #5d5d5d;
+}
+
+.btn:disabled {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--accent-blue);
+    border: none;
+    color: white;
+    font-weight: 600;
+}
+
+.btn-primary:hover {
+    background: var(--accent-blue-light);
+}
+
+.btn-primary:disabled {
+    background: #555;
+    color: #888;
+}
+
+.btn-danger {
+    background: var(--accent-red);
+    border: none;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #ff5a52;
+}
+
+.btn-large {
+    padding: 10px 16px;
+    font-size: 13px;
+    min-height: 40px;
+}
+
+/* 样式选择 */
+.style-section {
+    margin-top: 12px;
+}
+
+.style-select {
+    width: 100%;
+    background: var(--bg-tertiary);
+    border: 1px solid #4d4d4d;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23808080' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+
+.style-select:hover {
+    border-color: #5d5d5d;
+}
+
+.style-select:focus {
+    border-color: var(--accent-blue);
+}
+
+.process-section {
+    margin-top: auto;
+    padding-top: 12px;
+}
+
+/* 预览区域 */
+.preview-container {
+    flex: 1;
+    display: flex;
+    gap: 0;
+}
+
+.preview-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    min-width: 0;
+}
+
+.preview-panel:first-child {
+    border-right: 1px solid var(--border-color);
+}
+
+.preview-area {
+    flex: 1;
+    background: #1a1a1a;
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.preview-area img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.preview-placeholder {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* 右键菜单 */
+.context-menu {
+    position: fixed;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 6px;
+    min-width: 180px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    display: none;
+}
+
+.context-menu.visible {
+    display: block;
+}
+
+.context-menu-item {
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.context-menu-item:hover {
+    background: var(--accent-blue);
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 6px 8px;
+}
+
+/* 拖放提示 */
+.drop-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 132, 255, 0.1);
+    border: 3px dashed var(--accent-blue);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    pointer-events: none;
+}
+
+.drop-overlay.visible {
+    display: flex;
+}
+
+.drop-overlay-text {
+    background: var(--bg-tertiary);
+    padding: 20px 40px;
+    border-radius: 8px;
+    font-size: 16px;
+    color: var(--accent-blue);
+}
+
+/* 进度对话框 */
+.progress-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.progress-overlay.visible {
+    display: flex;
+}
+
+.progress-dialog {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 24px 32px;
+    min-width: 400px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.progress-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+}
+
+.progress-bar-container {
+    height: 20px;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    position: relative;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: repeating-linear-gradient(
+        -45deg,
+        var(--accent-orange),
+        var(--accent-orange) 10px,
+        #cc7a00 10px,
+        #cc7a00 20px
+    );
+    background-size: 28px 100%;
+    animation: progress-stripe 0.5s linear infinite;
+    border-radius: 10px;
+    transition: width 0.25s ease;
+}
+
+@keyframes progress-stripe {
+    0% { background-position: 0 0; }
+    100% { background-position: 28px 0; }
+}
+
+.progress-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.progress-error {
+    background: rgba(255, 59, 48, 0.1);
+    border: 1px solid var(--accent-red);
+    border-radius: 4px;
+    padding: 12px;
+    margin-top: 12px;
+    color: var(--accent-red);
+    font-size: 12px;
+    display: none;
+}
+
+.progress-error.visible {
+    display: block;
+}
+
+.progress-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+/* 状态栏 */
+.status-bar {
+    height: var(--status-height);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 5;
+}
+</style>
 </head>
 <body>
-    <div class="main-container">
-        <div class="left-panel">
-            <div class="list-header">
-                <span class="panel-title" id="panelTitle">图片列表</span>
-                <span class="list-info" id="listInfo">共 0 张图片</span>
-            </div>
 
-            <input type="text" class="search-box" id="searchBox" placeholder="搜索图片...">
-
-            <div class="file-list-container">
-                <div class="file-list" id="fileList">
-                    <div class="empty-hint" id="emptyHint">
-                        将图片或文件夹拖放到此处<br>或点击下方按钮添加
-                    </div>
-                </div>
-            </div>
-
-            <div class="button-group">
-                <button class="btn" id="btnAdd" onclick="bridge.requestAddFiles()">添加图片</button>
-                <button class="btn" id="btnSelectAll" onclick="selectAllFiles()">全选</button>
-                <button class="btn" id="btnClear" onclick="bridge.requestClearFiles()">清空</button>
-            </div>
-
-            <div class="style-section">
-                <span class="panel-title" id="styleTitle">水印样式</span>
-                <select class="style-select" id="styleSelect" onchange="onStyleChange()">
-                </select>
-            </div>
-
-            <div class="process-section" id="processSection">
-                <button class="btn btn-primary btn-large" id="btnProcess" onclick="startProcessing()">开始处理</button>
-            </div>
+<div class="main-container">
+    <div class="left-panel">
+        <div class="list-header">
+            <span class="panel-title" id="panelTitle">图片列表</span>
+            <span class="list-info" id="listInfo">共 0 张图片</span>
         </div>
 
-        <div class="preview-container">
-            <div class="preview-panel">
-                <span class="panel-title" id="originalTitle">原图</span>
-                <div class="preview-area" id="originalPreview">
-                    <span class="preview-placeholder" id="originalPlaceholder">选择图片以预览</span>
-                    <img id="originalImage" style="display: none;">
-                </div>
-            </div>
-            <div class="preview-panel">
-                <span class="panel-title" id="resultTitle">效果预览</span>
-                <div class="preview-area" id="resultPreview">
-                    <span class="preview-placeholder" id="resultPlaceholder">选择图片以预览</span>
-                    <img id="resultImage" style="display: none;">
+        <input type="text" class="search-box" id="searchBox" placeholder="搜索图片...">
+
+        <div class="file-list-container">
+            <div class="file-list" id="fileList">
+                <div class="empty-hint" id="emptyHint">
+                    将图片或文件夹拖放到此处<br>或点击下方按钮添加
                 </div>
             </div>
         </div>
-    </div>
 
-    <div class="context-menu" id="contextMenu">
-        <div class="context-menu-item" id="menuCheckSelected" onclick="checkSelectedItems()">勾选选中项</div>
-        <div class="context-menu-item" id="menuUncheckSelected" onclick="uncheckSelectedItems()">取消勾选选中项</div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" id="menuSelectAll" onclick="selectAllItems()">全选</div>
-        <div class="context-menu-item" id="menuDeselectAll" onclick="deselectAllItems()">取消全选</div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" id="menuOpenFile" onclick="openCurrentFile()">打开文件</div>
-        <div class="context-menu-item" id="menuOpenFolder" onclick="openCurrentFolder()">打开所在文件夹</div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" id="menuRemoveSelected" onclick="removeSelectedItems()">移除选中项</div>
-        <div class="context-menu-item" id="menuClearAll" onclick="bridge.requestClearFiles()">清空所有</div>
-    </div>
+        <div class="button-group">
+            <button class="btn" id="btnAdd">添加图片</button>
+            <button class="btn" id="btnSelectAll">全选</button>
+            <button class="btn" id="btnClear">清空</button>
+        </div>
 
-    <div class="drop-overlay" id="dropOverlay">
-        <div class="drop-overlay-text">释放以添加图片</div>
-    </div>
+        <div class="style-section">
+            <span class="panel-title" id="styleTitle">水印样式</span>
+            <select class="style-select" id="styleSelect"></select>
+        </div>
 
-    <!-- Progress Overlay -->
-    <div class="progress-overlay" id="progressOverlay">
-        <div class="progress-dialog">
-            <div class="progress-title" id="progressTitle">导出中...</div>
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill" id="progressFill" style="width: 0%;"></div>
-            </div>
-            <div class="progress-text" id="progressText">准备中...</div>
-            <div class="progress-error" id="progressError"></div>
-            <div class="progress-buttons">
-                <button class="btn btn-danger" id="btnCancelProgress" onclick="cancelProcessing()">取消</button>
-            </div>
+        <div class="process-section">
+            <button class="btn btn-primary btn-large" id="btnProcess" disabled>开始处理</button>
         </div>
     </div>
 
-    <div class="status-bar" id="statusBar">就绪</div>
+    <div class="preview-container">
+        <div class="preview-panel">
+            <span class="panel-title" id="originalTitle">原图</span>
+            <div class="preview-area" id="originalPreview">
+                <span class="preview-placeholder" id="originalPlaceholder">选择图片以预览</span>
+                <img id="originalImage" style="display:none;">
+            </div>
+        </div>
+        <div class="preview-panel">
+            <span class="panel-title" id="resultTitle">效果预览</span>
+            <div class="preview-area" id="resultPreview">
+                <span class="preview-placeholder" id="resultPlaceholder">选择图片以预览</span>
+                <img id="resultImage" style="display:none;">
+            </div>
+        </div>
+    </div>
+</div>
 
-    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-    <script>
-        let bridge = null;
-        let fileList = [];
-        let selectedPaths = new Set();
-        let currentContextPath = null;
-        let isProcessing = false;
-        let currentStyleValue = '';
+<div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" id="menuSelectAll">全选</div>
+    <div class="context-menu-item" id="menuDeselectAll">取消全选</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="menuOpenFile">打开文件</div>
+    <div class="context-menu-item" id="menuOpenFolder">打开所在文件夹</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="menuRemoveSelected">移除选中项</div>
+    <div class="context-menu-item" id="menuClearAll">清空所有</div>
+</div>
 
-        const $ = (id) => document.getElementById(id);
+<div class="drop-overlay" id="dropOverlay">
+    <div class="drop-overlay-text">释放以添加图片</div>
+</div>
 
-        document.addEventListener('DOMContentLoaded', () => {
-            new QWebChannel(qt.webChannelTransport, function(channel) {
-                bridge = channel.objects.bridge;
-                
-                bridge.filesAdded.connect(function(jsonData) {
-                    fileList = JSON.parse(jsonData);
-                    renderFileList();
-                });
+<div class="progress-overlay" id="progressOverlay">
+    <div class="progress-dialog">
+        <div class="progress-title" id="progressTitle">导出中...</div>
+        <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progressFill" style="width: 0%;"></div>
+        </div>
+        <div class="progress-text" id="progressText">准备中...</div>
+        <div class="progress-error" id="progressError"></div>
+        <div class="progress-buttons">
+            <button class="btn btn-danger" id="btnCancelProgress">取消</button>
+        </div>
+    </div>
+</div>
 
-                bridge.previewUpdated.connect(function(original, result) {
-                    updatePreview(original, result);
-                });
+<div class="status-bar" id="statusBar">就绪</div>
 
-                bridge.progressUpdated.connect(function(current, total, filename) {
-                    updateProgress(current, total, filename);
-                });
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+(function() {
+    'use strict';
 
-                bridge.processingFinished.connect(function(resultJson) {
-                    onProcessingFinished(JSON.parse(resultJson));
-                });
+    // 全局状态
+    let bridge = null;
+    let fileList = [];           // 完整文件列表
+    let filteredList = [];       // 筛选后的文件列表
+    let selectedPaths = new Set(); // 选中的文件路径
+    let lastClickedPath = null;  // 最后点击的路径（用于Shift多选）
+    let currentStyleValue = '';
+    let isProcessing = false;
+    let translations = {};
 
-                bridge.processingError.connect(function(errorMsg) {
-                    onProcessingError(errorMsg);
-                });
+    // DOM 元素缓存
+    const $ = id => document.getElementById(id);
+    const elements = {};
 
-                bridge.statusMessage.connect(function(message) {
-                    const bar = $('statusBar');
-                    if (bar) bar.textContent = message;
-                });
-
-                bridge.uiTextsUpdated.connect(function(textsJson) {
-                    updateUITexts(JSON.parse(textsJson));
-                });
-
-                bridge.showProgressOverlay.connect(function(show) {
-                    const overlay = $('progressOverlay');
-                    if (overlay) {
-                        if (show) {
-                            overlay.classList.add('visible');
-                            isProcessing = true;
-                        } else {
-                            overlay.classList.remove('visible');
-                            isProcessing = false;
-                        }
-                    }
-                });
-
-                initializeUI().catch(console.error);
-            });
+    // 初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        cacheElements();
+        
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            bridge = channel.objects.bridge;
+            bindBridgeEvents();
+            bindUIEvents();
+            initializeUI();
         });
+    });
 
-        async function initializeUI() {
-            const textsJson = await bridge.getTranslations();
-            const texts = JSON.parse(textsJson);
-            updateUITexts(texts);
+    function cacheElements() {
+        const ids = [
+            'panelTitle', 'listInfo', 'searchBox', 'fileList', 'emptyHint',
+            'btnAdd', 'btnSelectAll', 'btnClear', 'styleTitle', 'styleSelect',
+            'btnProcess', 'originalTitle', 'originalPlaceholder', 'originalImage',
+            'resultTitle', 'resultPlaceholder', 'resultImage', 'contextMenu',
+            'menuSelectAll', 'menuDeselectAll', 'menuOpenFile', 'menuOpenFolder',
+            'menuRemoveSelected', 'menuClearAll', 'dropOverlay', 'progressOverlay',
+            'progressTitle', 'progressFill', 'progressText', 'progressError',
+            'btnCancelProgress', 'statusBar'
+        ];
+        ids.forEach(id => elements[id] = $(id));
+    }
 
-            const stylesJson = await bridge.getStyles();
-            const stylesData = JSON.parse(stylesJson);
-            const styleSelect = $('styleSelect');
-            if (styleSelect) {
-                styleSelect.innerHTML = '';
-                stylesData.styles.forEach(style => {
-                    const option = document.createElement('option');
-                    option.value = style.value;
-                    option.textContent = style.display;
-                    if (style.value === stylesData.current) {
-                        option.selected = true;
-                        currentStyleValue = style.value;
-                    }
-                    styleSelect.appendChild(option);
-                });
-            }
+    function bindBridgeEvents() {
+        bridge.filesUpdated.connect(onFilesUpdated);
+        bridge.previewUpdated.connect(onPreviewUpdated);
+        bridge.progressUpdated.connect(onProgressUpdated);
+        bridge.processingFinished.connect(onProcessingFinished);
+        bridge.processingError.connect(onProcessingError);
+        bridge.statusMessage.connect(onStatusMessage);
+        bridge.uiTextsUpdated.connect(onUITextsUpdated);
+        bridge.stylesUpdated.connect(onStylesUpdated);
+        bridge.showProgressOverlay.connect(onShowProgressOverlay);
+    }
 
-            const fileListJson = await bridge.getFileList();
-            fileList = JSON.parse(fileListJson);
-            renderFileList();
-        }
+    function bindUIEvents() {
+        // 按钮事件
+        elements.btnAdd.addEventListener('click', () => bridge.requestAddFiles());
+        elements.btnSelectAll.addEventListener('click', toggleSelectAll);
+        elements.btnClear.addEventListener('click', () => bridge.requestClearFiles());
+        elements.btnProcess.addEventListener('click', startProcessing);
+        elements.btnCancelProgress.addEventListener('click', () => bridge.cancelProcessing());
 
-        function updateUITexts(texts) {
-            $('panelTitle') && ($('panelTitle').textContent = texts.panel_image_list || '图片列表');
-            $('searchBox') && ($('searchBox').placeholder = texts.search_placeholder || '搜索图片...');
-            $('btnAdd') && ($('btnAdd').textContent = texts.btn_add_images || '添加图片');
-            $('btnSelectAll') && ($('btnSelectAll').textContent = texts.btn_select_all || '全选');
-            $('btnClear') && ($('btnClear').textContent = texts.btn_clear_list || '清空');
-            $('styleTitle') && ($('styleTitle').textContent = texts.panel_watermark_style || '水印样式');
-            $('btnProcess') && ($('btnProcess').textContent = texts.btn_process || '开始处理');
-            $('btnCancelProgress') && ($('btnCancelProgress').textContent = texts.btn_cancel || '取消');
-            $('originalTitle') && ($('originalTitle').textContent = texts.preview_original || '原图');
-            $('resultTitle') && ($('resultTitle').textContent = texts.preview_result || '效果预览');
-            $('originalPlaceholder') && ($('originalPlaceholder').textContent = texts.preview_no_image || '选择图片以预览');
-            $('resultPlaceholder') && ($('resultPlaceholder').textContent = texts.preview_no_image || '选择图片以预览');
-            if ($('emptyHint')) {
-                $('emptyHint').innerHTML = (texts.drop_hint || '将图片或文件夹拖放到此处<br>或点击下方按钮添加').replace(/\\n/g, '<br>');
-            }
-            $('statusBar') && ($('statusBar').textContent = texts.msg_ready || '就绪');
-            
-            // Context menu
-            $('menuCheckSelected') && ($('menuCheckSelected').textContent = texts.ctx_check_selected || '勾选选中项');
-            $('menuUncheckSelected') && ($('menuUncheckSelected').textContent = texts.ctx_uncheck_selected || '取消勾选选中项');
-            $('menuSelectAll') && ($('menuSelectAll').textContent = texts.ctx_select_all || '全选');
-            $('menuDeselectAll') && ($('menuDeselectAll').textContent = texts.ctx_deselect_all || '取消全选');
-            $('menuOpenFile') && ($('menuOpenFile').textContent = texts.ctx_open_file || '打开文件');
-            $('menuOpenFolder') && ($('menuOpenFolder').textContent = texts.ctx_open_folder || '打开所在文件夹');
-            $('menuRemoveSelected') && ($('menuRemoveSelected').textContent = texts.ctx_remove_selected || '移除选中项');
-            $('menuClearAll') && ($('menuClearAll').textContent = texts.ctx_clear_all || '清空所有');
-        }
+        // 样式选择
+        elements.styleSelect.addEventListener('change', onStyleChange);
 
-        function renderFileList() {
-            const container = $('fileList');
-            const emptyHint = $('emptyHint');
-            const searchBox = $('searchBox');
-            const searchText = (searchBox ? searchBox.value : '').toLowerCase();
+        // 搜索框
+        elements.searchBox.addEventListener('input', onSearchInput);
 
-            if (!container || !emptyHint) return;
+        // 右键菜单
+        elements.menuSelectAll.addEventListener('click', () => { selectAll(); hideContextMenu(); });
+        elements.menuDeselectAll.addEventListener('click', () => { deselectAll(); hideContextMenu(); });
+        elements.menuOpenFile.addEventListener('click', openCurrentFile);
+        elements.menuOpenFolder.addEventListener('click', openCurrentFolder);
+        elements.menuRemoveSelected.addEventListener('click', removeSelected);
+        elements.menuClearAll.addEventListener('click', () => { bridge.requestClearFiles(); hideContextMenu(); });
 
-            container.innerHTML = '';
-
-            if (fileList.length === 0) {
-                container.appendChild(emptyHint);
-                emptyHint.style.display = 'flex';
-                updateListInfo();
-                return;
-            }
-
-            emptyHint.style.display = 'none';
-
-            fileList.forEach(file => {
-                if (searchText && !file.name.toLowerCase().includes(searchText)) {
-                    return;
-                }
-
-                const item = document.createElement('div');
-                item.className = 'file-item' + (selectedPaths.has(file.path) ? ' selected' : '');
-                item.dataset.path = file.path;
-
-                const thumbnailHtml = file.thumbnail 
-                    ? `<img src="${file.thumbnail}" alt="">` 
-                    : '<span class="thumbnail-placeholder">...</span>';
-
-                item.innerHTML = `
-                    <div class="checkmark ${file.checked ? 'checked' : ''}" data-path="${encodeURIComponent(file.path)}"></div>
-                    <div class="thumbnail">${thumbnailHtml}</div>
-                    <span class="file-name">${escapeHtml(file.name)}</span>
-                `;
-
-                item.addEventListener('click', (e) => onItemClick(e, file.path));
-                item.addEventListener('dblclick', (e) => onItemDoubleClick(e, file.path));
-                item.addEventListener('contextmenu', (e) => onItemContextMenu(e, file.path));
-
-                const checkmark = item.querySelector('.checkmark');
-                if (checkmark) {
-                    checkmark.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        toggleCheck(e, file.path);
-                    });
-                }
-
-                container.appendChild(item);
-            });
-
-            updateListInfo();
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function toggleCheck(event, path) {
-            event.stopPropagation();
-            const file = fileList.find(f => f.path === path);
-            if (file) {
-                file.checked = !file.checked;
-                if (bridge && bridge.setFileChecked) {
-                    bridge.setFileChecked(JSON.stringify({path: path, checked: file.checked}));
-                }
-                renderFileList();
-            }
-        }
-
-        function onItemClick(event, path) {
-            if (event.ctrlKey || event.metaKey) {
-                if (selectedPaths.has(path)) {
-                    selectedPaths.delete(path);
-                } else {
-                    selectedPaths.add(path);
-                }
-            } else if (event.shiftKey && selectedPaths.size > 0) {
-                const paths = fileList.map(f => f.path);
-                const lastSelected = Array.from(selectedPaths).pop();
-                const startIdx = paths.indexOf(lastSelected);
-                const endIdx = paths.indexOf(path);
-                const [minIdx, maxIdx] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
-                for (let i = minIdx; i <= maxIdx; i++) {
-                    selectedPaths.add(paths[i]);
-                }
-            } else {
-                selectedPaths.clear();
-                selectedPaths.add(path);
-            }
-            renderFileList();
-            if (bridge && bridge.selectFile) {
-                bridge.selectFile(path);
-            }
-        }
-
-        function onItemDoubleClick(event, path) {
-            const file = fileList.find(f => f.path === path);
-            if (file) {
-                file.checked = !file.checked;
-                if (bridge && bridge.setFileChecked) {
-                    bridge.setFileChecked(JSON.stringify({path: path, checked: file.checked}));
-                }
-                renderFileList();
-            }
-        }
-
-        function onItemContextMenu(event, path) {
-            event.preventDefault();
-            currentContextPath = path;
-            
-            if (!selectedPaths.has(path)) {
-                selectedPaths.clear();
-                selectedPaths.add(path);
-                renderFileList();
-            }
-
-            const menu = $('contextMenu');
-            if (menu) {
-                menu.style.left = event.clientX + 'px';
-                menu.style.top = event.clientY + 'px';
-                menu.classList.add('visible');
-            }
-        }
-
-        function selectAllFiles() {
-            if (bridge && bridge.checkAll) bridge.checkAll();
-        }
-
-        function selectAllItems() {
-            fileList.forEach(f => selectedPaths.add(f.path));
-            renderFileList();
-            hideContextMenu();
-        }
-
-        function deselectAllItems() {
-            selectedPaths.clear();
-            renderFileList();
-            hideContextMenu();
-        }
-
-        function checkSelectedItems() {
-            if (bridge && bridge.checkSelected) {
-                bridge.checkSelected(JSON.stringify(Array.from(selectedPaths)));
-            }
-            hideContextMenu();
-        }
-
-        function uncheckSelectedItems() {
-            if (bridge && bridge.uncheckSelected) {
-                bridge.uncheckSelected(JSON.stringify(Array.from(selectedPaths)));
-            }
-            hideContextMenu();
-        }
-
-        function removeSelectedItems() {
-            if (bridge && bridge.removeSelected) {
-                bridge.removeSelected(JSON.stringify(Array.from(selectedPaths)));
-            }
-            selectedPaths.clear();
-            hideContextMenu();
-        }
-
-        function openCurrentFile() {
-            if (currentContextPath && bridge && bridge.openFile) {
-                bridge.openFile(currentContextPath);
-            }
-            hideContextMenu();
-        }
-
-        function openCurrentFolder() {
-            if (currentContextPath && bridge && bridge.openFolder) {
-                bridge.openFolder(currentContextPath);
-            }
-            hideContextMenu();
-        }
-
-        function hideContextMenu() {
-            const menu = $('contextMenu');
-            if (menu) menu.classList.remove('visible');
-        }
-
-        function onStyleChange() {
-            const styleSelect = $('styleSelect');
-            if (!styleSelect) return;
-            currentStyleValue = styleSelect.value;
-            if (bridge && bridge.setStyle) {
-                bridge.setStyle(currentStyleValue);
-            }
-            if (selectedPaths.size === 1 && bridge && bridge.selectFile) {
-                bridge.selectFile(Array.from(selectedPaths)[0]);
-            }
-        }
-
-        function startProcessing() {
-            if (bridge && bridge.startProcessing) {
-                bridge.startProcessing(currentStyleValue);
-            }
-        }
-
-        function cancelProcessing() {
-            if (bridge && bridge.cancelProcessing) {
-                bridge.cancelProcessing();
-            }
-        }
-
-        function showProgressOverlay(show) {
-            const overlay = $('progressOverlay');
-            const error = $('progressError');
-            if (overlay) {
-                if (show) {
-                    overlay.classList.add('visible');
-                    if (error) {
-                        error.classList.remove('visible');
-                        error.textContent = '';
-                    }
-                    isProcessing = true;
-                } else {
-                    overlay.classList.remove('visible');
-                    isProcessing = false;
-                }
-            }
-        }
-
-        function updateProgress(current, total, filename) {
-            showProgressOverlay(true);
-            const percent = (current / total) * 100;
-            const fill = $('progressFill');
-            const text = $('progressText');
-            const title = $('progressTitle');
-            if (fill) fill.style.width = percent + '%';
-            if (text) text.textContent = filename;
-            if (title) title.textContent = `导出第 ${current}/${total} 张`;
-        }
-
-        function onProcessingFinished(result) {
-            showProgressOverlay(false);
-        }
-
-        function onProcessingError(errorMsg) {
-            const error = $('progressError');
-            const btn = $('btnCancelProgress');
-            if (error) {
-                error.textContent = errorMsg;
-                error.classList.add('visible');
-            }
-            if (btn) {
-                btn.textContent = '关闭';
-                btn.onclick = function() {
-                    showProgressOverlay(false);
-                    btn.textContent = '取消';
-                    btn.onclick = cancelProcessing;
-                };
-            }
-        }
-
-        function updatePreview(originalBase64, resultBase64) {
-            const originalImg = $('originalImage');
-            const originalPlaceholder = $('originalPlaceholder');
-            const resultImg = $('resultImage');
-            const resultPlaceholder = $('resultPlaceholder');
-
-            if (originalImg && originalPlaceholder) {
-                if (originalBase64) {
-                    originalImg.src = originalBase64;
-                    originalImg.style.display = 'block';
-                    originalPlaceholder.style.display = 'none';
-                } else {
-                    originalImg.style.display = 'none';
-                    originalPlaceholder.style.display = 'block';
-                }
-            }
-
-            if (resultImg && resultPlaceholder) {
-                if (resultBase64) {
-                    resultImg.src = resultBase64;
-                    resultImg.style.display = 'block';
-                    resultPlaceholder.style.display = 'none';
-                } else {
-                    resultImg.style.display = 'none';
-                    resultPlaceholder.style.display = 'block';
-                }
-            }
-        }
-
-        function updateListInfo() {
-            const total = fileList.length;
-            const checked = fileList.filter(f => f.checked).length;
-            const info = $('listInfo');
-            const btn = $('btnProcess');
-            
-            if (info) {
-                if (checked > 0) {
-                    info.textContent = `已选择 ${checked} / ${total} 张`;
-                } else {
-                    info.textContent = `共 ${total} 张图片`;
-                }
-            }
-            if (btn) {
-                btn.textContent = checked > 0 ? '处理选中' : '开始处理';
-            }
-        }
-
-        const searchBoxEl = $('searchBox');
-        if (searchBoxEl) {
-            searchBoxEl.addEventListener('input', function() {
-                renderFileList();
-            });
-        }
-
-        document.addEventListener('click', function(e) {
+        // 全局点击隐藏右键菜单
+        document.addEventListener('click', (e) => {
             if (!e.target.closest('.context-menu')) {
                 hideContextMenu();
             }
         });
 
-        document.addEventListener('dragenter', function(e) {
-            e.preventDefault();
-            if (!isProcessing) {
-                const overlay = $('dropOverlay');
-                if (overlay) overlay.classList.add('visible');
+        // 键盘快捷键
+        document.addEventListener('keydown', onKeyDown);
+
+        // 拖放
+        document.addEventListener('dragenter', onDragEnter);
+        document.addEventListener('dragleave', onDragLeave);
+        document.addEventListener('dragover', (e) => e.preventDefault());
+        document.addEventListener('drop', onDrop);
+    }
+
+    async function initializeUI() {
+        // 加载翻译
+        const textsJson = await bridge.getTranslations();
+        translations = JSON.parse(textsJson);
+        applyTranslations();
+
+        // 加载样式
+        const stylesJson = await bridge.getStyles();
+        const stylesData = JSON.parse(stylesJson);
+        rebuildStyleSelect(stylesData);
+
+        // 加载文件列表
+        const fileListJson = await bridge.getFileList();
+        fileList = JSON.parse(fileListJson);
+        applyFilter();
+        renderFileList();
+    }
+
+    // ==================== 文件列表相关 ====================
+
+    function onFilesUpdated(jsonData) {
+        fileList = JSON.parse(jsonData);
+        
+        // 清理已不存在的选中项
+        const pathSet = new Set(fileList.map(f => f.path));
+        selectedPaths = new Set([...selectedPaths].filter(p => pathSet.has(p)));
+        
+        applyFilter();
+        renderFileList();
+        updateProcessButton();
+    }
+
+    function applyFilter() {
+        const searchText = elements.searchBox.value.toLowerCase().trim();
+        if (!searchText) {
+            filteredList = [...fileList];
+        } else {
+            filteredList = fileList.filter(f => 
+                f.name.toLowerCase().includes(searchText)
+            );
+        }
+    }
+
+    function onSearchInput() {
+        applyFilter();
+        renderFileList();
+    }
+
+    function renderFileList() {
+        const container = elements.fileList;
+        const emptyHint = elements.emptyHint;
+
+        // 清空容器
+        container.innerHTML = '';
+
+        if (filteredList.length === 0) {
+            container.appendChild(emptyHint);
+            emptyHint.style.display = 'flex';
+            updateListInfo();
+            return;
+        }
+
+        emptyHint.style.display = 'none';
+
+        // 创建文件项
+        filteredList.forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            if (selectedPaths.has(file.path)) {
+                item.classList.add('selected');
             }
+            item.dataset.path = file.path;
+
+            const thumbHtml = file.thumbnail
+                ? `<img src="${file.thumbnail}" alt="">`
+                : '<span class="thumbnail-placeholder">...</span>';
+
+            item.innerHTML = `
+                <div class="thumbnail">${thumbHtml}</div>
+                <span class="file-name" title="${escapeHtml(file.path)}">${escapeHtml(file.name)}</span>
+            `;
+
+            item.addEventListener('click', (e) => onFileItemClick(e, file.path));
+            item.addEventListener('contextmenu', (e) => onFileItemContextMenu(e, file.path));
+
+            container.appendChild(item);
         });
 
-        document.addEventListener('dragleave', function(e) {
-            const overlay = $('dropOverlay');
-            if (overlay && e.target === overlay) {
-                overlay.classList.remove('visible');
+        updateListInfo();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function onFileItemClick(event, path) {
+        event.stopPropagation();
+
+        if (event.ctrlKey || event.metaKey) {
+            // Ctrl+点击：切换选中状态
+            if (selectedPaths.has(path)) {
+                selectedPaths.delete(path);
+            } else {
+                selectedPaths.add(path);
             }
-        });
+            lastClickedPath = path;
+        } else if (event.shiftKey && lastClickedPath) {
+            // Shift+点击：范围选择
+            const paths = filteredList.map(f => f.path);
+            const startIdx = paths.indexOf(lastClickedPath);
+            const endIdx = paths.indexOf(path);
 
-        document.addEventListener('dragover', function(e) {
-            e.preventDefault();
-        });
-
-        document.addEventListener('drop', function(e) {
-            e.preventDefault();
-            const overlay = $('dropOverlay');
-            if (overlay) overlay.classList.remove('visible');
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (isProcessing) return;
-            
-            if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                selectAllItems();
-            } else if (e.key === 'Delete') {
-                if (selectedPaths.size > 0) {
-                    removeSelectedItems();
+            if (startIdx !== -1 && endIdx !== -1) {
+                const minIdx = Math.min(startIdx, endIdx);
+                const maxIdx = Math.max(startIdx, endIdx);
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    selectedPaths.add(paths[i]);
                 }
-            } else if (e.key === 'Escape') {
-                hideContextMenu();
-                deselectAllItems();
             }
+        } else {
+            // 普通点击：单选
+            selectedPaths.clear();
+            selectedPaths.add(path);
+            lastClickedPath = path;
+        }
+
+        renderFileList();
+        updateProcessButton();
+
+        // 请求预览最后点击的图片
+        if (selectedPaths.size > 0) {
+            bridge.requestPreview(path);
+        }
+    }
+
+    function onFileItemContextMenu(event, path) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        // 如果右键点击的项未被选中，则选中它
+        if (!selectedPaths.has(path)) {
+            selectedPaths.clear();
+            selectedPaths.add(path);
+            lastClickedPath = path;
+            renderFileList();
+            updateProcessButton();
+        }
+
+        showContextMenu(event.clientX, event.clientY);
+    }
+
+    function updateListInfo() {
+        const total = fileList.length;
+        const selected = selectedPaths.size;
+
+        if (selected > 0) {
+            elements.listInfo.textContent = translations.selected_count
+                ? translations.selected_count.replace('{selected}', selected).replace('{total}', total)
+                : `已选择 ${selected}/${total} 张`;
+        } else {
+            elements.listInfo.textContent = translations.image_count
+                ? translations.image_count.replace('{count}', total)
+                : `共 ${total} 张图片`;
+        }
+    }
+
+    // ==================== 选择操作 ====================
+
+    function selectAll() {
+        filteredList.forEach(f => selectedPaths.add(f.path));
+        renderFileList();
+        updateProcessButton();
+    }
+
+    function deselectAll() {
+        selectedPaths.clear();
+        lastClickedPath = null;
+        renderFileList();
+        updateProcessButton();
+    }
+
+    function toggleSelectAll() {
+        if (selectedPaths.size === filteredList.length && filteredList.length > 0) {
+            deselectAll();
+        } else {
+            selectAll();
+        }
+    }
+
+    function removeSelected() {
+        if (selectedPaths.size > 0) {
+            bridge.removeSelected(JSON.stringify([...selectedPaths]));
+        }
+        hideContextMenu();
+    }
+
+    // ==================== 右键菜单 ====================
+
+    let currentContextPath = null;
+
+    function showContextMenu(x, y) {
+        currentContextPath = selectedPaths.size === 1 ? [...selectedPaths][0] : null;
+        
+        const menu = elements.contextMenu;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.classList.add('visible');
+    }
+
+    function hideContextMenu() {
+        elements.contextMenu.classList.remove('visible');
+    }
+
+    function openCurrentFile() {
+        if (currentContextPath) {
+            bridge.openFile(currentContextPath);
+        }
+        hideContextMenu();
+    }
+
+    function openCurrentFolder() {
+        if (currentContextPath) {
+            bridge.openFolder(currentContextPath);
+        }
+        hideContextMenu();
+    }
+
+    // ==================== 样式相关 ====================
+
+    function rebuildStyleSelect(stylesData) {
+        const select = elements.styleSelect;
+        select.innerHTML = '';
+
+        stylesData.styles.forEach(style => {
+            const opt = document.createElement('option');
+            opt.value = style.value;
+            opt.textContent = style.display;
+            if (style.value === stylesData.current) {
+                opt.selected = true;
+                currentStyleValue = style.value;
+            }
+            select.appendChild(opt);
         });
-    </script>
+    }
+
+    function onStyleChange() {
+        currentStyleValue = elements.styleSelect.value;
+        bridge.setStyle(currentStyleValue);
+
+        // 如果有选中的图片，刷新预览
+        if (selectedPaths.size > 0) {
+            const lastSelected = [...selectedPaths].pop();
+            bridge.requestPreview(lastSelected);
+        }
+    }
+
+    function onStylesUpdated(jsonStr) {
+        const data = JSON.parse(jsonStr);
+        rebuildStyleSelect(data);
+    }
+
+    // ==================== 处理相关 ====================
+
+    function updateProcessButton() {
+        const btn = elements.btnProcess;
+        const count = selectedPaths.size;
+
+        if (count > 0) {
+            btn.disabled = false;
+            btn.textContent = translations.btn_process_selected
+                ? translations.btn_process_selected.replace('{count}', count)
+                : `处理选中 (${count})`;
+        } else {
+            btn.disabled = true;
+            btn.textContent = translations.btn_process || '开始处理';
+        }
+    }
+
+    function startProcessing() {
+        if (selectedPaths.size === 0) {
+            return;
+        }
+
+        const data = {
+            style_name: currentStyleValue,
+            selected_paths: [...selectedPaths]
+        };
+        bridge.startProcessing(JSON.stringify(data));
+    }
+
+    function onProgressUpdated(current, total, filename) {
+        const percent = (current / total) * 100;
+        elements.progressFill.style.width = percent + '%';
+        elements.progressText.textContent = filename;
+        elements.progressTitle.textContent = translations.exporting
+            ? translations.exporting.replace('{current}', current).replace('{total}', total)
+            : `导出第 ${current}/${total} 张`;
+    }
+
+    function onProcessingFinished(resultJson) {
+        isProcessing = false;
+        elements.progressOverlay.classList.remove('visible');
+    }
+
+    function onProcessingError(errorMsg) {
+        elements.progressError.textContent = errorMsg;
+        elements.progressError.classList.add('visible');
+
+        const btn = elements.btnCancelProgress;
+        btn.textContent = translations.close || '关闭';
+        btn.onclick = function() {
+            elements.progressOverlay.classList.remove('visible');
+            elements.progressError.classList.remove('visible');
+            btn.textContent = translations.btn_cancel || '取消';
+            btn.onclick = () => bridge.cancelProcessing();
+        };
+    }
+
+    function onShowProgressOverlay(show) {
+        if (show) {
+            elements.progressOverlay.classList.add('visible');
+            elements.progressError.classList.remove('visible');
+            isProcessing = true;
+        } else {
+            elements.progressOverlay.classList.remove('visible');
+            isProcessing = false;
+        }
+    }
+
+    // ==================== 预览相关 ====================
+
+    function onPreviewUpdated(originalBase64, resultBase64) {
+        if (originalBase64) {
+            elements.originalImage.src = originalBase64;
+            elements.originalImage.style.display = 'block';
+            elements.originalPlaceholder.style.display = 'none';
+        } else {
+            elements.originalImage.style.display = 'none';
+            elements.originalPlaceholder.style.display = 'block';
+        }
+
+        if (resultBase64) {
+            elements.resultImage.src = resultBase64;
+            elements.resultImage.style.display = 'block';
+            elements.resultPlaceholder.style.display = 'none';
+        } else {
+            elements.resultImage.style.display = 'none';
+            elements.resultPlaceholder.style.display = 'block';
+        }
+    }
+
+    // ==================== 键盘快捷键 ====================
+
+    function onKeyDown(e) {
+        if (isProcessing) return;
+
+        // Ctrl+A / Cmd+A：全选
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                // Ctrl+Shift+A：取消全选
+                deselectAll();
+            } else {
+                // Ctrl+A：全选
+                selectAll();
+            }
+            return;
+        }
+
+        // Delete：删除选中
+        if (e.key === 'Delete' && selectedPaths.size > 0) {
+            e.preventDefault();
+            removeSelected();
+            return;
+        }
+
+        // Escape：取消选择
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            deselectAll();
+            hideContextMenu();
+            return;
+        }
+    }
+
+    // ==================== 拖放 ====================
+
+    function onDragEnter(e) {
+        e.preventDefault();
+        if (!isProcessing) {
+            elements.dropOverlay.classList.add('visible');
+        }
+    }
+
+    function onDragLeave(e) {
+        if (e.target === elements.dropOverlay) {
+            elements.dropOverlay.classList.remove('visible');
+        }
+    }
+
+    function onDrop(e) {
+        e.preventDefault();
+        elements.dropOverlay.classList.remove('visible');
+        // 实际的文件处理由 Qt 端完成
+    }
+
+    // ==================== 状态和翻译 ====================
+
+    function onStatusMessage(message) {
+        elements.statusBar.textContent = message;
+    }
+
+    function onUITextsUpdated(textsJson) {
+        translations = JSON.parse(textsJson);
+        applyTranslations();
+    }
+
+    function applyTranslations() {
+        elements.panelTitle.textContent = translations.panel_image_list || '图片列表';
+        elements.searchBox.placeholder = translations.search_placeholder || '搜索图片...';
+        elements.btnAdd.textContent = translations.btn_add_images || '添加图片';
+        elements.btnSelectAll.textContent = translations.btn_select_all || '全选';
+        elements.btnClear.textContent = translations.btn_clear_list || '清空';
+        elements.styleTitle.textContent = translations.panel_watermark_style || '水印样式';
+        elements.originalTitle.textContent = translations.preview_original || '原图';
+        elements.resultTitle.textContent = translations.preview_result || '效果预览';
+        elements.originalPlaceholder.textContent = translations.preview_no_image || '选择图片以预览';
+        elements.resultPlaceholder.textContent = translations.preview_no_image || '选择图片以预览';
+        elements.statusBar.textContent = translations.msg_ready || '就绪';
+        elements.btnCancelProgress.textContent = translations.btn_cancel || '取消';
+
+        elements.menuSelectAll.textContent = translations.ctx_select_all || '全选';
+        elements.menuDeselectAll.textContent = translations.ctx_deselect_all || '取消全选';
+        elements.menuOpenFile.textContent = translations.ctx_open_file || '打开文件';
+        elements.menuOpenFolder.textContent = translations.ctx_open_folder || '打开所在文件夹';
+        elements.menuRemoveSelected.textContent = translations.ctx_remove_selected || '移除选中项';
+        elements.menuClearAll.textContent = translations.ctx_clear_all || '清空所有';
+
+        if (elements.emptyHint) {
+            elements.emptyHint.innerHTML = (translations.drop_hint || '将图片或文件夹拖放到此处<br>或点击下方按钮添加').replace(/\\n/g, '<br>');
+        }
+
+        updateListInfo();
+        updateProcessButton();
+    }
+
+})();
+</script>
 </body>
 </html>'''
 
 
-# ==================== Settings Dialog&设置对话框 ====================
-
+# ==================== Settings Dialog ====================
 class SettingsDialog(QDialog):
-    """Settings Dialog&设置对话框"""
-
     def __init__(self, config_manager: ConfigManager, parent=None):
         super().__init__(parent)
         self.config_manager = config_manager
@@ -1506,11 +1451,12 @@ class SettingsDialog(QDialog):
         self.setMinimumSize(500, 560)
         self.setModal(True)
 
+        from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
 
-        # Language Section
+        # Language
         lang_group = QGroupBox(L("Language&语言"))
         lang_layout = QVBoxLayout(lang_group)
         self.language_combo = QComboBox()
@@ -1524,14 +1470,12 @@ class SettingsDialog(QDialog):
         lang_layout.addWidget(self.language_combo)
         layout.addWidget(lang_group)
 
-        # Session Section
+        # Session
         self.restore_session_check = QCheckBox(L("Restore images from last session on startup&启动时恢复上次打开的图片"))
-        self.restore_session_check.setChecked(
-            self.config.get('general', {}).get('restore_last_session', True)
-        )
+        self.restore_session_check.setChecked(self.config.get('general', {}).get('restore_last_session', True))
         layout.addWidget(self.restore_session_check)
 
-        # Output Section
+        # Output
         output_group = QGroupBox(L("Output Settings&输出设置"))
         output_layout = QVBoxLayout(output_group)
 
@@ -1548,7 +1492,6 @@ class SettingsDialog(QDialog):
         self.output_dir_edit.setPlaceholderText(L("Output directory...&输出目录..."))
         self.output_dir_edit.setEnabled(False)
         path_layout.addWidget(self.output_dir_edit)
-
         self.browse_btn = QPushButton(L("Browse...&浏览..."))
         self.browse_btn.setEnabled(False)
         self.browse_btn.setFixedWidth(80)
@@ -1565,7 +1508,7 @@ class SettingsDialog(QDialog):
             self.custom_dir_radio.setChecked(True)
         self.output_dir_edit.setText(output_config.get('custom_directory', ''))
 
-        # Filename pattern
+        # filename pattern
         pattern_layout = QHBoxLayout()
         pattern_layout.addWidget(QLabel(L("Filename pattern&文件名格式:")))
         self.filename_pattern_edit = QLineEdit()
@@ -1574,12 +1517,12 @@ class SettingsDialog(QDialog):
         pattern_layout.addWidget(self.filename_pattern_edit)
         output_layout.addLayout(pattern_layout)
 
-        # JPEG quality
+        # quality
         quality_layout = QHBoxLayout()
         quality_layout.addWidget(QLabel(L("JPEG Quality&JPEG质量:")))
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 100)
-        self.quality_spin.setValue(output_config.get('jpeg_quality', 95))
+        self.quality_spin.setValue(output_config.get('jpeg_quality', 97))
         self.quality_spin.setSuffix(" %")
         quality_layout.addWidget(self.quality_spin)
         quality_layout.addStretch()
@@ -1595,27 +1538,18 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(output_group)
 
-        # Time Source Section
+        # Time Source
         time_group = QGroupBox(L("Time Source&时间源"))
         time_layout = QVBoxLayout(time_group)
-        
         time_layout.addWidget(QLabel(L("Primary source&主时间源:")))
-
         self.time_exif_radio = QRadioButton(L("EXIF Date Taken (Recommended)&EXIF拍摄时间（推荐）"))
         self.time_modified_radio = QRadioButton(L("File Modified Time&文件修改时间"))
         self.time_created_radio = QRadioButton(L("File Created Time&文件创建时间"))
         self.time_custom_radio = QRadioButton(L("Custom Time&自定义时间"))
-
-        time_btn_group = QButtonGroup(self)
-        time_btn_group.addButton(self.time_exif_radio)
-        time_btn_group.addButton(self.time_modified_radio)
-        time_btn_group.addButton(self.time_created_radio)
-        time_btn_group.addButton(self.time_custom_radio)
-
-        time_layout.addWidget(self.time_exif_radio)
-        time_layout.addWidget(self.time_modified_radio)
-        time_layout.addWidget(self.time_created_radio)
-        
+        btn_group = QButtonGroup(self)
+        for b in (self.time_exif_radio, self.time_modified_radio, self.time_created_radio, self.time_custom_radio):
+            btn_group.addButton(b)
+            time_layout.addWidget(b)
         custom_time_layout = QHBoxLayout()
         custom_time_layout.addWidget(self.time_custom_radio)
         self.custom_time_edit = QDateTimeEdit()
@@ -1624,6 +1558,7 @@ class SettingsDialog(QDialog):
         self.custom_time_edit.setEnabled(False)
         custom_time_layout.addWidget(self.custom_time_edit)
         time_layout.addLayout(custom_time_layout)
+        self.time_custom_radio.toggled.connect(lambda checked: self.custom_time_edit.setEnabled(checked))
 
         time_config = self.config.get('time_source', {})
         primary = time_config.get('primary', 'exif')
@@ -1633,7 +1568,7 @@ class SettingsDialog(QDialog):
             self.time_modified_radio.setChecked(True)
         elif primary == 'file_created':
             self.time_created_radio.setChecked(True)
-        elif primary == 'custom':
+        else:
             self.time_custom_radio.setChecked(True)
             self.custom_time_edit.setEnabled(True)
             custom_time_str = time_config.get('custom_time', '')
@@ -1644,10 +1579,7 @@ class SettingsDialog(QDialog):
                 except:
                     pass
 
-        self.time_custom_radio.toggled.connect(lambda checked: self.custom_time_edit.setEnabled(checked))
-
         time_layout.addSpacing(8)
-        
         fallback_layout = QHBoxLayout()
         fallback_layout.addWidget(QLabel(L("When EXIF unavailable&当EXIF不可用时:")))
         self.fallback_combo = QComboBox()
@@ -1655,39 +1587,30 @@ class SettingsDialog(QDialog):
         self.fallback_combo.addItem(L("Use file modified time&使用文件修改时间"), "file_modified")
         self.fallback_combo.addItem(L("Use file created time&使用文件创建时间"), "file_created")
         self.fallback_combo.addItem(L("Use custom time&使用自定义时间"), "custom")
-        
         fallback_mode = time_config.get('fallback_mode', 'error')
         for i in range(self.fallback_combo.count()):
             if self.fallback_combo.itemData(i) == fallback_mode:
                 self.fallback_combo.setCurrentIndex(i)
                 break
-        
         fallback_layout.addWidget(self.fallback_combo)
         time_layout.addLayout(fallback_layout)
-
         layout.addWidget(time_group)
 
         layout.addStretch()
 
-        # Buttons
+        # buttons
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-
         reset_btn = QPushButton(L("Reset to Default&恢复默认"))
         reset_btn.clicked.connect(self._reset_settings)
         btn_layout.addWidget(reset_btn)
-
         btn_layout.addStretch()
-
         cancel_btn = QPushButton(L("Cancel&取消"))
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
-
         save_btn = QPushButton(L("Save&保存"))
         save_btn.setMinimumWidth(90)
         save_btn.clicked.connect(self._save_and_close)
         btn_layout.addWidget(save_btn)
-
         layout.addLayout(btn_layout)
 
     def _on_dir_option_changed(self):
@@ -1702,12 +1625,11 @@ class SettingsDialog(QDialog):
 
     def _reset_settings(self):
         self.config = self.config_manager.get_default()
-        # Could reload UI here
         self.language_combo.setCurrentIndex(1)  # zh
         self.restore_session_check.setChecked(True)
         self.same_dir_radio.setChecked(True)
         self.filename_pattern_edit.setText("{original}_stamped")
-        self.quality_spin.setValue(95)
+        self.quality_spin.setValue(97)
         self.preserve_exif_check.setChecked(True)
         self.overwrite_check.setChecked(False)
         self.time_exif_radio.setChecked(True)
@@ -1727,7 +1649,6 @@ class SettingsDialog(QDialog):
             primary = 'file_created'
         else:
             primary = 'custom'
-
         custom_time = ""
         if self.time_custom_radio.isChecked():
             dt = self.custom_time_edit.dateTime().toPyDateTime()
@@ -1738,7 +1659,6 @@ class SettingsDialog(QDialog):
             'fallback_mode': self.fallback_combo.currentData(),
             'custom_time': custom_time
         }
-
         self.config['output'] = {
             'same_directory': self.same_dir_radio.isChecked(),
             'custom_directory': self.output_dir_edit.text(),
@@ -1747,7 +1667,6 @@ class SettingsDialog(QDialog):
             'preserve_exif': self.preserve_exif_check.isChecked(),
             'overwrite_existing': self.overwrite_check.isChecked()
         }
-
         self.config_manager.save(self.config)
         self.accept()
 
@@ -1755,11 +1674,64 @@ class SettingsDialog(QDialog):
         return self.config
 
 
-# ==================== About Dialog&关于对话框 ====================
+class ShortcutsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(L("Keyboard Shortcuts&快捷键"))
+        self.setFixedSize(420, 380)
 
+        from PyQt6.QtWidgets import QVBoxLayout, QGridLayout
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        title = QLabel(L("Keyboard Shortcuts&快捷键"))
+        title.setStyleSheet("font-size:16px; font-weight:bold;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        layout.addSpacing(8)
+
+        # 快捷键列表
+        shortcuts = [
+            ("Ctrl+O", L("Import Images&导入图片")),
+            ("Ctrl+Shift+O", L("Import Folder&导入文件夹")),
+            ("Ctrl+A", L("Select All&全选")),
+            ("Ctrl+Shift+A", L("Deselect All&取消全选")),
+            ("Delete", L("Remove Selected&移除选中项")),
+            ("Escape", L("Cancel Selection&取消选择")),
+            ("Ctrl+,", L("Settings&设置")),
+            ("Ctrl+Q", L("Exit&退出")),
+        ]
+
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        grid.setColumnMinimumWidth(0, 120)
+
+        for row, (key, desc) in enumerate(shortcuts):
+            key_label = QLabel(key)
+            key_label.setStyleSheet("""
+                background: #3d3d3d;
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-family: monospace;
+                font-weight: bold;
+            """)
+            desc_label = QLabel(desc)
+            grid.addWidget(key_label, row, 0)
+            grid.addWidget(desc_label, row, 1)
+
+        layout.addLayout(grid)
+        layout.addStretch()
+
+        close_btn = QPushButton(L("Close&关闭"))
+        close_btn.setFixedHeight(36)
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+
+# ==================== About Dialog ====================
 class AboutDialog(QDialog):
-    """About Dialog&关于对话框"""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(L("About Photo Timestamper&关于照片时间水印添加器"))
@@ -1767,6 +1739,7 @@ class AboutDialog(QDialog):
 
         from PyQt6.QtGui import QPixmap
         from PyQt6.QtCore import QSize
+        from PyQt6.QtWidgets import QVBoxLayout
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 32)
@@ -1778,22 +1751,18 @@ class AboutDialog(QDialog):
         logo_path = get_base_path() / "assets" / "logo.png"
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
-            scaled = pixmap.scaled(
-                QSize(80, 80),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
+            scaled = pixmap.scaled(QSize(80, 80), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             logo_label.setPixmap(scaled)
         else:
             logo_label.setText("📷")
-            logo_label.setStyleSheet("font-size: 48px;")
+            logo_label.setStyleSheet("font-size:48px;")
         layout.addWidget(logo_label)
 
         layout.addSpacing(16)
 
         name_label = QLabel("Photo Timestamper")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        name_label.setStyleSheet("font-size:18px; font-weight:bold;")
         layout.addWidget(name_label)
 
         layout.addSpacing(4)
@@ -1804,7 +1773,7 @@ class AboutDialog(QDialog):
 
         layout.addSpacing(12)
 
-        desc_label = QLabel(L("A professional tool for adding timestamp watermarks to photos&为照片添加仿相机原厂风格的时间戳水印工具"))
+        desc_label = QLabel(L("A tool for adding camera-style timestamp watermarks to photos&为照片添加仿相机原厂风格的时间戳水印工具"))
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
@@ -1813,7 +1782,7 @@ class AboutDialog(QDialog):
 
         author_title = QLabel(L("Author&作者"))
         author_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_title.setStyleSheet("color: #888;")
+        author_title.setStyleSheet("color:#888;")
         layout.addWidget(author_title)
 
         author_name = QLabel(__author__)
@@ -1824,7 +1793,7 @@ class AboutDialog(QDialog):
 
         collab_title = QLabel(L("Collaborators&协作"))
         collab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        collab_title.setStyleSheet("color: #888;")
+        collab_title.setStyleSheet("color:#888;")
         layout.addWidget(collab_title)
 
         collab_names = QLabel(" · ".join(__collaborators__))
@@ -1835,7 +1804,7 @@ class AboutDialog(QDialog):
 
         license_label = QLabel("GPL-3.0")
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        license_label.setStyleSheet("color: #888;")
+        license_label.setStyleSheet("color:#888;")
         layout.addWidget(license_label)
 
         layout.addSpacing(12)
@@ -1857,19 +1826,16 @@ class AboutDialog(QDialog):
         webbrowser.open("https://github.com/Water-Run/photo-timestamper")
 
 
-# ==================== Import Dialog&导入对话框 ====================
-
+# ==================== Import Dialog ====================
 class ImportDialog(QDialog):
-    """Import Images Dialog&导入图片对话框"""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(L("Import Images&导入图片"))
         self.setFixedSize(380, 220)
-
         self.selected_files: list[str] = []
         self.recursive = True
 
+        from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
@@ -1885,7 +1851,6 @@ class ImportDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
-
         file_btn = QPushButton(L("Select Image Files&选择图片文件"))
         file_btn.setMinimumHeight(36)
         file_btn.clicked.connect(self._select_files)
@@ -1927,24 +1892,22 @@ class ImportDialog(QDialog):
         return self.selected_files
 
 
-# ==================== Language Selection Dialog&语言选择对话框 ====================
-
+# ==================== Language Selection Dialog ====================
 class LanguageSelectDialog(QDialog):
-    """First Run Language Selection Dialog&首次运行语言选择对话框"""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Language / 选择语言")
         self.setFixedSize(380, 240)
         self.selected_language = "zh"
 
+        from PyQt6.QtWidgets import QVBoxLayout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 28, 28, 28)
         layout.setSpacing(16)
 
         title = QLabel("Select Language / 选择语言")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        title.setStyleSheet("font-size:16px; font-weight:bold;")
         layout.addWidget(title)
 
         desc = QLabel("Please select your preferred language:\n请选择您偏好的语言：")
@@ -1957,7 +1920,7 @@ class LanguageSelectDialog(QDialog):
         self.language_combo.setMinimumHeight(38)
         self.language_combo.addItem("English", "en")
         self.language_combo.addItem("简体中文", "zh")
-        self.language_combo.setCurrentIndex(1)  # Default to Chinese
+        self.language_combo.setCurrentIndex(1)
         layout.addWidget(self.language_combo)
 
         layout.addStretch()
@@ -1975,31 +1938,23 @@ class LanguageSelectDialog(QDialog):
         return self.selected_language
 
 
-# ==================== Main Window&主窗口 ====================
-
+# ==================== Main Window ====================
 class MainWindow(QMainWindow):
-    """Main Window - QtWebEngine Version&主窗口 - QtWebEngine版本"""
-
     def __init__(self):
         super().__init__()
-
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load()
         self.style_manager = StyleManager()
 
-        # Set language
         saved_lang = self.config.get('general', {}).get('language', 'zh')
-        if saved_lang:
-            LocalizationManager.set_language(saved_lang)
+        LocalizationManager.set_language(saved_lang)
 
         self.processing_thread: ProcessingThread | None = None
 
         self._init_ui()
         self._setup_menu()
-        self._setup_shortcuts()
         self._load_ui_state()
 
-        # First run check
         if self.config_manager.is_first_run():
             QTimer.singleShot(100, self._show_language_selection)
         else:
@@ -2010,43 +1965,29 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(L("Photo Timestamper&照片时间水印添加器"))
         self.setMinimumSize(1200, 700)
 
-        # Set application icon
         icon_path = get_base_path() / "assets" / "logo.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         else:
-            icon_path = get_base_path() / "assets" / "logo.png"
-            if icon_path.exists():
-                self.setWindowIcon(QIcon(str(icon_path)))
+            alt = get_base_path() / "assets" / "logo.png"
+            if alt.exists():
+                self.setWindowIcon(QIcon(str(alt)))
 
-        # Create WebEngine view
         self.web_view = QWebEngineView()
-
-        # Create WebChannel and Bridge
         self.bridge = WebBridge(self)
         self.channel = QWebChannel()
         self.channel.registerObject('bridge', self.bridge)
         self.web_view.page().setWebChannel(self.channel)
-
-        # Load HTML
-        self.web_view.setHtml(get_html_content())
-
-        # Set as central widget
+        self.web_view.setHtml(get_html_content(), QUrl("qrc:///"))
         self.setCentralWidget(self.web_view)
-
-        # Status bar
         self.statusBar().showMessage(L("Ready&就绪"))
 
     def _setup_menu(self):
-        """Setup menu bar&设置菜单栏"""
         from PyQt6.QtGui import QAction
-
         menubar = self.menuBar()
         menubar.clear()
 
-        # Images Menu (renamed from File)
         images_menu = menubar.addMenu(L("Images&图片"))
-
         import_action = QAction(L("Import Images...&导入图片..."), self)
         import_action.setShortcut("Ctrl+O")
         import_action.triggered.connect(self._show_import_dialog)
@@ -2058,20 +1999,17 @@ class MainWindow(QMainWindow):
         images_menu.addAction(import_folder_action)
 
         images_menu.addSeparator()
-
         clear_action = QAction(L("Clear List&清空列表"), self)
         clear_action.setShortcut("Ctrl+Shift+Delete")
         clear_action.triggered.connect(self._clear_files)
         images_menu.addAction(clear_action)
 
         images_menu.addSeparator()
-
         exit_action = QAction(L("Exit&退出"), self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         images_menu.addAction(exit_action)
 
-        # Software Menu (merged Edit + Help)
         software_menu = menubar.addMenu(L("Software&软件"))
 
         settings_action = QAction(L("Settings...&设置..."), self)
@@ -2079,19 +2017,18 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self._show_settings)
         software_menu.addAction(settings_action)
 
+        shortcuts_action = QAction(L("Keyboard Shortcuts&快捷键"), self)
+        shortcuts_action.setShortcut("Ctrl+/")
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        software_menu.addAction(shortcuts_action)
+
         software_menu.addSeparator()
 
         about_action = QAction(L("About&关于"), self)
         about_action.triggered.connect(self._show_about)
         software_menu.addAction(about_action)
 
-    def _setup_shortcuts(self):
-        """Setup keyboard shortcuts&设置快捷键"""
-        process_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        process_shortcut.activated.connect(self._start_processing)
-
     def _show_language_selection(self):
-        """Show language selection dialog&显示语言选择对话框"""
         dialog = LanguageSelectDialog(self)
         if dialog.exec():
             selected_lang = dialog.get_selected_language()
@@ -2102,7 +2039,6 @@ class MainWindow(QMainWindow):
             self._update_ui_texts()
 
     def _show_import_dialog(self):
-        """Show import dialog&显示导入对话框"""
         dialog = ImportDialog(self)
         if dialog.exec():
             files = dialog.get_files()
@@ -2110,7 +2046,6 @@ class MainWindow(QMainWindow):
                 self._add_files(files)
 
     def _import_folder(self):
-        """Import folder directly&直接导入文件夹"""
         folder = QFileDialog.getExistingDirectory(self, L("Select Folder&选择文件夹"))
         if folder:
             files = scan_images(folder, recursive=True)
@@ -2118,24 +2053,20 @@ class MainWindow(QMainWindow):
                 self._add_files(files)
 
     def _add_files(self, files: list[str]):
-        """Add files&添加文件"""
         added, duplicates = self.bridge.add_files(files)
-
         if duplicates > 0:
             self.statusBar().showMessage(
-                L("Added {count} images&已添加 {count} 张图片").replace("{count}", str(added)) + 
-                " | " + 
+                L("Added {count} images&已添加 {count} 张图片").replace("{count}", str(added)) +
+                " | " +
                 L("Skipped {count} duplicate images&跳过 {count} 张重复图片").replace("{count}", str(duplicates))
             )
         else:
             self.statusBar().showMessage(L("Added {count} images&已添加 {count} 张图片").replace("{count}", str(added)))
 
     def _clear_files(self):
-        """Clear files&清空文件"""
         self.bridge.requestClearFiles()
 
     def _show_settings(self):
-        """Show settings dialog&显示设置对话框"""
         dialog = SettingsDialog(self.config_manager, self)
         if dialog.exec():
             self.config = self.config_manager.load()
@@ -2143,168 +2074,162 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(L("Settings saved&设置已保存"))
 
     def _show_about(self):
-        """Show about dialog&显示关于对话框"""
         dialog = AboutDialog(self)
         dialog.exec()
+        
+    def _show_shortcuts(self):
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
+
+    # ---------- Preview ----------
+    def _make_preview_b64(self, image: Image.Image, max_long: int = 960, quality: int = 80) -> str:
+        im = image.copy()
+        im.thumbnail((max_long, max_long), Image.Resampling.LANCZOS)
+        if im.mode != 'RGB':
+            im = im.convert('RGB')
+        buf = BytesIO()
+        im.save(buf, format='JPEG', quality=quality)
+        return f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
 
     def _update_preview(self, filepath: str):
-        """Update preview&更新预览"""
         try:
-            image = Image.open(filepath)
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            with Image.open(filepath) as image:
+                if image.mode not in ('RGB', 'RGBA'):
+                    image = image.convert('RGB')
 
-            # Original preview
-            original_copy = image.copy()
-            original_copy.thumbnail((1800, 1350), Image.Resampling.LANCZOS)
-            original_buffer = BytesIO()
-            original_copy.save(original_buffer, format='JPEG', quality=85)
-            original_b64 = f"data:image/jpeg;base64,{base64.b64encode(original_buffer.getvalue()).decode('utf-8')}"
+                original_b64 = self._make_preview_b64(image, max_long=960, quality=80)
 
-            # Effect preview
-            style_name = self.config.get('ui', {}).get('last_style', 'CANON&佳能')
-            style = self.style_manager.load_style(style_name)
+                style_name = self.config.get('ui', {}).get('last_style', 'CANON&佳能')
+                style = self.style_manager.load_style(style_name)
 
-            time_config = self.config.get('time_source', {})
-            extractor = TimeExtractor(
-                primary=time_config.get('primary', 'exif'),
-                fallback_mode=time_config.get('fallback_mode', 'error'),
-                custom_time=time_config.get('custom_time', '')
-            )
-            
-            try:
-                timestamp = extractor.extract(filepath)
-            except:
-                timestamp = datetime.now()
+                time_config = self.config.get('time_source', {})
+                extractor = TimeExtractor(
+                    primary=time_config.get('primary', 'exif'),
+                    fallback_mode=time_config.get('fallback_mode', 'error'),
+                    custom_time=time_config.get('custom_time', '')
+                )
+                try:
+                    timestamp = extractor.extract(filepath)
+                except:
+                    timestamp = datetime.now()
 
-            renderer = WatermarkRenderer(style, self.style_manager.fonts_dir)
-            result = renderer.render_preview(image, timestamp, (1800, 1350))
+                renderer = WatermarkRenderer(style, self.style_manager.fonts_dir)
 
-            result_buffer = BytesIO()
-            result.save(result_buffer, format='JPEG', quality=85)
-            result_b64 = f"data:image/jpeg;base64,{base64.b64encode(result_buffer.getvalue()).decode('utf-8')}"
+                preview_base = image.copy()
+                preview_base.thumbnail((960, 960), Image.Resampling.LANCZOS)
+                result_img = renderer.render(preview_base, timestamp)
+                result_b64 = self._make_preview_b64(result_img, max_long=960, quality=80)
 
-            self.bridge.previewUpdated.emit(original_b64, result_b64)
-
+                self.bridge.previewUpdated.emit(original_b64, result_b64)
         except Exception as e:
-            logger.error(f"Failed to generate preview&生成预览失败: {e}")
+            logger.error(f"Failed to generate preview: {e}")
             self.bridge.previewUpdated.emit('', '')
 
-    def _start_processing(self):
-        """Start processing (from menu or shortcut)&开始处理（从菜单或快捷键）"""
-        checked = [item['path'] for item in self.bridge._file_list if item.get('checked')]
-        if checked:
-            files = checked
-        else:
-            files = self.bridge.get_all_files()
-
-        if not files:
-            QMessageBox.warning(self, L("Photo Timestamper&照片时间水印添加器"), L("Please add images first&请先添加图片"))
-            return
-
-        style_name = self.config.get('ui', {}).get('last_style', 'CANON&佳能')
-        self._start_processing_with_files(files, style_name)
-
+    # ---------- Processing ----------
     def _start_processing_with_files(self, files: list[str], style_name: str):
-        """Start processing with specified files&使用指定文件开始处理"""
         processor = BatchProcessor(self.config, self.style_manager)
-
         self.processing_thread = ProcessingThread(processor, files, style_name)
         self.processing_thread.progress.connect(self._on_progress)
         self.processing_thread.preview.connect(self._on_processing_preview)
         self.processing_thread.finished.connect(self._on_finished)
         self.processing_thread.error.connect(self._on_error)
-
         self.bridge.showProgressOverlay.emit(True)
         self.processing_thread.start()
 
     def _cancel_processing(self):
-        """Cancel processing&取消处理"""
         if self.processing_thread:
             self.processing_thread.cancel()
             self.statusBar().showMessage(L("Cancelling...&正在取消..."))
 
     def _on_progress(self, current: int, total: int, filename: str):
-        """Update progress&更新进度"""
         self.bridge.progressUpdated.emit(current, total, filename)
         self.statusBar().showMessage(
-            L("Exporting {current}/{total}&导出第 {current}/{total} 张").replace("{current}", str(current)).replace("{total}", str(total)) + 
-            f": {filename}"
+            L("Exporting {current}/{total}&导出第 {current}/{total} 张").replace("{current}", str(current)).replace("{total}", str(total))
+            + f": {filename}"
         )
 
     def _on_processing_preview(self, filepath: str, image: Image.Image):
-        """Update preview during processing&处理时更新预览"""
         try:
+            img = image.copy()
+            img.thumbnail((960, 960), Image.Resampling.LANCZOS)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
             buffer = BytesIO()
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            image.save(buffer, format='JPEG', quality=85)
+            img.save(buffer, format='JPEG', quality=78)
             result_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}"
             self.bridge.previewUpdated.emit('', result_b64)
         except Exception as e:
-            logger.debug(f"Preview update failed&预览更新失败: {e}")
+            logger.debug(f"Preview update failed: {e}")
 
     def _on_finished(self, results: dict):
-        """Processing finished&处理完成"""
         self.bridge.showProgressOverlay.emit(False)
-
         success = results.get('success', 0)
         failed = results.get('failed', 0)
-
         self.statusBar().showMessage(
             L("Complete: {success} succeeded, {failed} failed&处理完成：成功 {success} 张，失败 {failed} 张")
-            .replace("{success}", str(success))
-            .replace("{failed}", str(failed))
+            .replace("{success}", str(success)).replace("{failed}", str(failed))
         )
-
         if failed == 0:
             QMessageBox.information(
-                self, 
-                L("Photo Timestamper&照片时间水印添加器"), 
+                self,
+                L("Photo Timestamper&照片时间水印添加器"),
                 L("Successfully processed {count} images&成功处理 {count} 张图片").replace("{count}", str(success))
             )
 
     def _on_error(self, error: str):
-        """Processing error&处理错误"""
         self.bridge.processingError.emit(L(error))
         self.statusBar().showMessage(L("Processing error&处理出错"))
 
+    # ---------- UI text reload ----------
     def _update_ui_texts(self):
-        """Update all UI texts&更新所有UI文本"""
         self.setWindowTitle(L("Photo Timestamper&照片时间水印添加器"))
         self._setup_menu()
-
-        # Notify web to update texts
         translations = json.dumps({
             "app_name": L("Photo Timestamper&照片时间水印添加器"),
             "panel_image_list": L("Image List&图片列表"),
             "panel_watermark_style": L("Watermark Style&水印样式"),
             "search_placeholder": L("Search images...&搜索图片..."),
+            "image_count": L("{count} images&共 {count} 张图片"),
+            "selected_count": L("{selected}/{total} selected&已选择 {selected}/{total} 张"),
             "btn_add_images": L("Add Images&添加图片"),
             "btn_select_all": L("Select All&全选"),
+            "btn_deselect_all": L("Deselect All&取消全选"),
             "btn_clear_list": L("Clear&清空"),
             "btn_process": L("Start Processing&开始处理"),
+            "btn_process_selected": L("Process Selected ({count})&处理选中 ({count})"),
             "btn_cancel": L("Cancel&取消"),
             "preview_original": L("Original&原图"),
             "preview_result": L("Preview&效果预览"),
             "preview_no_image": L("Select an image to preview&选择图片以预览"),
             "drop_hint": L("Drop images or folders here\\nor click button below to add&将图片或文件夹拖放到此处\\n或点击下方按钮添加"),
             "msg_ready": L("Ready&就绪"),
-            "ctx_check_selected": L("Check Selected&勾选选中项"),
-            "ctx_uncheck_selected": L("Uncheck Selected&取消勾选选中项"),
+            "msg_no_selection": L("Please select images to process&请选择要处理的图片"),
             "ctx_select_all": L("Select All&全选"),
             "ctx_deselect_all": L("Deselect All&取消全选"),
             "ctx_open_file": L("Open File&打开文件"),
             "ctx_open_folder": L("Open Containing Folder&打开所在文件夹"),
             "ctx_remove_selected": L("Remove Selected&移除选中项"),
             "ctx_clear_all": L("Clear All&清空所有"),
+            "close": L("Close&关闭"),
         }, ensure_ascii=False)
         self.bridge.uiTextsUpdated.emit(translations)
-
+        self._emit_styles()
         self.statusBar().showMessage(L("Ready&就绪"))
 
+    def _emit_styles(self):
+        styles = self.style_manager.list_styles()
+        last_style = self.config.get('ui', {}).get('last_style', 'CANON&佳能')
+        style_data = [{"value": s, "display": L(s)} for s in styles]
+        current = last_style if last_style in styles else (styles[0] if styles else "")
+        payload = json.dumps({
+            "styles": style_data,
+            "current": current,
+            "currentDisplay": L(current) if current else ""
+        }, ensure_ascii=False)
+        self.bridge.stylesUpdated.emit(payload)
+
+    # ---------- State ----------
     def _load_ui_state(self):
-        """Load UI state&加载UI状态"""
         geometry = self.config.get('ui', {}).get('window_geometry', '')
         if geometry:
             try:
@@ -2313,12 +2238,10 @@ class MainWindow(QMainWindow):
                 pass
 
     def _save_ui_state(self):
-        """Save UI state&保存UI状态"""
         self.config['ui']['window_geometry'] = self.saveGeometry().toHex().data().decode()
         self.config_manager.save(self.config)
 
     def _restore_last_session(self):
-        """Restore last session&恢复上次会话"""
         files = self.config_manager.get_last_session_files()
         if files:
             existing_files = [f for f in files if Path(f).exists()]
@@ -2326,7 +2249,6 @@ class MainWindow(QMainWindow):
                 self._add_files(existing_files)
 
     def _save_session(self):
-        """Save current session&保存当前会话"""
         if self.config.get('general', {}).get('restore_last_session', True):
             files = self.bridge.get_all_files()
             self.config_manager.save_session_files(files)
@@ -2334,7 +2256,6 @@ class MainWindow(QMainWindow):
             self.config_manager.clear_session_files()
 
     def closeEvent(self, event):
-        """Window close event&窗口关闭事件"""
         if self.processing_thread and self.processing_thread.isRunning():
             reply = QMessageBox.question(
                 self,
@@ -2355,14 +2276,11 @@ class MainWindow(QMainWindow):
 
 
 def run_app():
-    """Run application&运行应用程序"""
     app = QApplication(sys.argv)
     app.setApplicationName("Photo Timestamper")
     app.setOrganizationName("PhotoTimestamper")
-
     window = MainWindow()
     window.show()
-
     sys.exit(app.exec())
 
 
