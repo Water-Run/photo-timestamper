@@ -10,24 +10,24 @@ set "DEFAULT_DIR=%ProgramFiles%\PhotoTimestamper"
 
 :: ---------------------- Language selection ----------------------
 echo If you are using English, type "en" below to start the installation (case-insensitive).
-echo �����ʹ�õ�������, ���·����� "zh" ��ʼ��װ (�����ִ�Сд)
+echo 如果你使用的是中文, 在下方输入 "zh" 开始安装 (不区分大小写)
 set /p LANG=^|^> 
 set "LANG=%LANG:~0,2%"
 
 if /i "%LANG%"=="zh" (
-    set "L_MSG_CHOOSE_DIR=�����밲װ·�����س�ʹ��Ĭ��·������"
-    set "L_MSG_DEFAULT=Ĭ��·��"
-    set "L_MSG_NOT_EXIST=Ŀ¼�����ڣ��Ƿ񴴽���(Y/N)��"
-    set "L_MSG_EXISTS_NOT_EMPTY=Ŀ¼�Ѵ����ҷǿգ��Ƿ񸲸ǣ�(Y/N)��"
-    set "L_MSG_ABORT=������ȡ����"
-    set "L_MSG_COPY=���ڸ����ļ�..."
-    set "L_MSG_COPY_OK=������ɡ�"
-    set "L_MSG_COPY_FAIL=����ʧ�ܣ������룺"
-    set "L_MSG_SHORTCUT=�Ƿ񴴽���ݷ�ʽ����ʼ�˵������棩��(Y/N)��"
-    set "L_MSG_SHORTCUT_OK=��ݷ�ʽ�Ѵ�����"
-    set "L_MSG_SHORTCUT_FAIL=������ݷ�ʽʱ������"
-    set "L_MSG_DONE=��װ��ɣ�"
-    set "L_MSG_REMOVE_HINT=ж�ط�����ɾ����װĿ¼����ݷ�ʽ���ֶ�ɾ����"
+    set "L_MSG_CHOOSE_DIR=请输入安装路径（回车使用默认路径）："
+    set "L_MSG_DEFAULT=默认路径"
+    set "L_MSG_NOT_EXIST=目录不存在，是否创建？(Y/N)："
+    set "L_MSG_EXISTS_NOT_EMPTY=目录已存在且非空，是否覆盖？(Y/N)："
+    set "L_MSG_ABORT=操作已取消。"
+    set "L_MSG_COPY=正在复制文件..."
+    set "L_MSG_COPY_OK=复制完成。"
+    set "L_MSG_COPY_FAIL=复制失败，错误码："
+    set "L_MSG_SHORTCUT=是否创建快捷方式（开始菜单和桌面）？(Y/N)："
+    set "L_MSG_SHORTCUT_OK=快捷方式已创建。"
+    set "L_MSG_SHORTCUT_FAIL=创建快捷方式时出错。"
+    set "L_MSG_DONE=安装完成！"
+    set "L_MSG_REMOVE_HINT=卸载方法：删除安装目录；快捷方式请手动删除。"
 ) else (
     set "L_MSG_CHOOSE_DIR=Enter installation path (press Enter to use default):"
     set "L_MSG_DEFAULT=Default path"
