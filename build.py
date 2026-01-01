@@ -294,7 +294,11 @@ def _copy_file(src: Path, dst: Path) -> None:
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
-
+    
+def _ensure_empty_dirs(app_dir: Path) -> None:
+    """确保 exe 同级存在一些空目录（用于运行时写入）。"""
+    for d in ["simpsave"]:
+        (app_dir / d).mkdir(parents=True, exist_ok=True)
 
 def _ensure_external_runtime_layout(app_dir: Path) -> None:
     """确保 styles/fonts/assets 在 exe 同级。"""
@@ -542,9 +546,14 @@ def build(*, clean_first: bool = True, purge_spec: bool = False, console: bool =
     app_dir = DIST_DIR / APP_NAME
     if app_dir.exists():
         _ensure_external_runtime_layout(app_dir)
+
+        # 新增：创建 exe 同级空目录 simpsave/
+        _ensure_empty_dirs(app_dir)
+
         _fix_webengine_resources(app_dir)
-        
+
         final_dir = _package_to_final_directory(app_dir)
+
         final_app_dir = final_dir / APP_NAME
 
         exe_name = f"{APP_NAME}.exe" if IS_WINDOWS else APP_NAME

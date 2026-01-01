@@ -1448,7 +1448,7 @@ class SettingsDialog(QDialog):
         self.config = config_manager.load()
 
         self.setWindowTitle(L("Settings&设置"))
-        self.setMinimumSize(500, 560)
+        self.setMinimumSize(500, 720)
         self.setModal(True)
 
         from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout
@@ -1489,10 +1489,12 @@ class SettingsDialog(QDialog):
 
         path_layout = QHBoxLayout()
         self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setMinimumHeight(28)
         self.output_dir_edit.setPlaceholderText(L("Output directory...&输出目录..."))
         self.output_dir_edit.setEnabled(False)
         path_layout.addWidget(self.output_dir_edit)
         self.browse_btn = QPushButton(L("Browse...&浏览..."))
+        self.browse_btn.setMinimumHeight(28)
         self.browse_btn.setEnabled(False)
         self.browse_btn.setFixedWidth(80)
         self.browse_btn.clicked.connect(self._browse_output_dir)
@@ -1510,8 +1512,12 @@ class SettingsDialog(QDialog):
 
         # filename pattern
         pattern_layout = QHBoxLayout()
-        pattern_layout.addWidget(QLabel(L("Filename pattern&文件名格式:")))
+        pattern_label = QLabel(L("Filename pattern&文件名格式:"))
+        pattern_label.setFixedWidth(90)  
+        pattern_layout.addWidget(pattern_label)
         self.filename_pattern_edit = QLineEdit()
+        self.filename_pattern_edit.setMinimumHeight(28)
+        self.filename_pattern_edit.setPlaceholderText("{original}_{date}_{time}")
         self.filename_pattern_edit.setText(output_config.get('filename_pattern', '{original}_stamped'))
         self.filename_pattern_edit.setToolTip(L("Variables: {original}=original name, {date}=date, {time}=time, {index}=index&可用变量：{original}=原文件名, {date}=日期, {time}=时间, {index}=序号"))
         pattern_layout.addWidget(self.filename_pattern_edit)
@@ -1519,8 +1525,11 @@ class SettingsDialog(QDialog):
 
         # quality
         quality_layout = QHBoxLayout()
-        quality_layout.addWidget(QLabel(L("JPEG Quality&JPEG质量:")))
+        quality_label = QLabel(L("JPEG Quality&JPEG质量:"))
+        quality_label.setFixedWidth(90)  
+        quality_layout.addWidget(quality_label)
         self.quality_spin = QSpinBox()
+        self.quality_spin.setMinimumHeight(28)
         self.quality_spin.setRange(1, 100)
         self.quality_spin.setValue(output_config.get('jpeg_quality', 97))
         self.quality_spin.setSuffix(" %")
@@ -1553,6 +1562,7 @@ class SettingsDialog(QDialog):
         custom_time_layout = QHBoxLayout()
         custom_time_layout.addWidget(self.time_custom_radio)
         self.custom_time_edit = QDateTimeEdit()
+        self.custom_time_edit.setMinimumHeight(36)
         self.custom_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.custom_time_edit.setDateTime(QDateTime.currentDateTime())
         self.custom_time_edit.setEnabled(False)
@@ -1581,8 +1591,11 @@ class SettingsDialog(QDialog):
 
         time_layout.addSpacing(8)
         fallback_layout = QHBoxLayout()
-        fallback_layout.addWidget(QLabel(L("When EXIF unavailable&当EXIF不可用时:")))
+        fallback_label = QLabel(L("When EXIF unavailable&当EXIF不可用时:"))
+        fallback_label.setFixedWidth(130)  
+        fallback_layout.addWidget(fallback_label)
         self.fallback_combo = QComboBox()
+        self.fallback_combo.setMinimumHeight(36)
         self.fallback_combo.addItem(L("Throw error and abort&抛出异常并中止"), "error")
         self.fallback_combo.addItem(L("Use file modified time&使用文件修改时间"), "file_modified")
         self.fallback_combo.addItem(L("Use file created time&使用文件创建时间"), "file_created")
@@ -1605,9 +1618,11 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(reset_btn)
         btn_layout.addStretch()
         cancel_btn = QPushButton(L("Cancel&取消"))
+        cancel_btn.setMinimumHeight(36)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         save_btn = QPushButton(L("Save&保存"))
+        save_btn.setMinimumHeight(36) 
         save_btn.setMinimumWidth(90)
         save_btn.clicked.connect(self._save_and_close)
         btn_layout.addWidget(save_btn)

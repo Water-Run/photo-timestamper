@@ -94,8 +94,8 @@ logger = logging.getLogger(__name__)
 
 # ==================== Configuration Files&配置文件 ====================
 
-SS_CONFIG_FILE = ':ss:photo_timestamper_config.json'
-SS_SESSION_FILE = ':ss:photo_timestamper_session.json'
+SS_CONFIG_FILE = './simpsave/photo_timestamper_config.json'
+SS_SESSION_FILE = './simpsave/photo_timestamper_session.json'
 
 
 def get_base_path() -> Path:
